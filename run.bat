@@ -27,11 +27,16 @@ set /p end="End Index (default all): "
 if "!end!"=="" set end=9999
 
 set /p cutoff="Cutoff Date (YYYY-MM-DD, press Enter for last 30 days): "
+
+set /p refresh="Refresh followed artists cache? (y/n, default n): "
+set refresh_arg=
+if /i "!refresh!"=="y" set refresh_arg=--refresh
+
 if "!cutoff!"=="" (
     :: We leave it empty so Python uses its internal dynamic default
-    python main.py --start !start! --end !end!
+    python main.py --start !start! --end !end! !refresh_arg!
 ) else (
-    python main.py --start !start! --end !end! --cutoff !cutoff!
+    python main.py --start !start! --end !end! --cutoff !cutoff! !refresh_arg!
 )
 
 echo.

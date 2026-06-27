@@ -19,15 +19,11 @@ ENV/
 env/
 .env/
 
-# Frontend
-node_modules/
-dist/
-.vite/
-
-# Packaging
-build_pyinstaller/
-release/
-
 # IDEs
 .vscode/
 .idea/
+
+# PyInstaller / Compilation
+build/
+dist/
+*.spec
