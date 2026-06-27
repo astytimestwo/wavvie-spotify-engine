@@ -1,0 +1,33 @@
+# Credentials
+.env
+
+# Spotify Caches
+.cache
+.spotifycache
+followed_artists_cache.json
+
+# Performance & Exports
+tracklist_*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# Packaging
+build_pyinstaller/
+release/
+
+# IDEs
+.vscode/
+.idea/
