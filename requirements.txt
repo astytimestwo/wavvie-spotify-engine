@@ -2,3 +2,4 @@ spotipy
 python-dotenv
 PySide6
 pillow
+pyinstaller

@@ -1,5 +1,7 @@
 # Credentials
 .env
+.env.*
+!.env.example
 
 # Spotify Caches
 .cache
@@ -17,7 +19,6 @@ __pycache__/
 venv/
 ENV/
 env/
-.env/
 
 # IDEs
 .vscode/
@@ -26,4 +27,6 @@ env/
 # PyInstaller / Compilation
 build/
 dist/
-*.spec
+*.manifest
+*.pyz
+*.pkg

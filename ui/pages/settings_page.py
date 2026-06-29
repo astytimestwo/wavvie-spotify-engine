@@ -98,11 +98,11 @@ class SettingsPage(QWidget):
         
         # Checkboxes
         toggles = QHBoxLayout()
-        self.chk_export = QCheckBox("Automatically Export JSON")
+        self.chk_export = QCheckBox("Export JSON After Scan")
         self.chk_export.stateChanged.connect(self.save_settings)
         toggles.addWidget(self.chk_export)
         
-        self.chk_create_pl = QCheckBox("Automatically Create Playlist")
+        self.chk_create_pl = QCheckBox("Create Spotify Playlist After Scan")
         self.chk_create_pl.stateChanged.connect(self.save_settings)
         toggles.addWidget(self.chk_create_pl)
         
@@ -141,7 +141,7 @@ class SettingsPage(QWidget):
         self.load_settings()
 
     def load_settings(self):
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         
         workers = settings.value("default_workers", 5, type=int)
         playlist_name = settings.value("default_playlist_name", "New Releases", type=str)
@@ -160,7 +160,7 @@ class SettingsPage(QWidget):
         self.combo_cutoff.setCurrentIndex(cutoff_idx)
 
     def save_settings(self):
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         
         settings.setValue("default_workers", self.spin_workers.value())
         settings.setValue("default_playlist_name", self.txt_playlist_name.text())

@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ==========================================
-echo    Spotify Playlist Creator Automator
+echo    wavvie CLI Automator
 echo ==========================================
 
 :: Check if .env exists, if not, create it

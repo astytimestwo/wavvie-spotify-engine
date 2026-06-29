@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QFrame, QGridLayout, QDateEdit, 
                                QSpinBox, QCheckBox, QLineEdit, QStackedWidget,
                                QListWidget, QProgressBar)
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QColor, QImage
 from ui.theme import Theme
 from ui.widgets.circular_visualizer import CircularVisualizer
 from core.models import ScanConfiguration, ScanProgress, ScanResult
@@ -109,9 +109,9 @@ class ScanPage(QWidget):
         # Row 6: Toggles
         toggles_layout = QHBoxLayout()
         self.chk_refresh = QCheckBox("Refresh Artist Cache")
-        self.chk_export = QCheckBox("Export JSON")
+        self.chk_export = QCheckBox("Export JSON After Scan")
         self.chk_export.setChecked(True)
-        self.chk_create_playlist = QCheckBox("Create Playlist Auto")
+        self.chk_create_playlist = QCheckBox("Create Spotify Playlist After Scan")
         self.chk_create_playlist.setChecked(True)
         
         toggles_layout.addWidget(self.chk_refresh)
@@ -189,7 +189,7 @@ class ScanPage(QWidget):
         metrics_layout.addWidget(self.lbl_metrics)
         metrics_layout.addStretch()
         
-        self.lbl_current_artist = QLabel("Current Artist: None")
+        self.lbl_current_artist = QLabel("")
         self.lbl_current_artist.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 12px;")
         metrics_layout.addWidget(self.lbl_current_artist)
         
@@ -198,7 +198,7 @@ class ScanPage(QWidget):
         
         # Live activity stream Console log
         console_title = QLabel("LIVE LOG CONSOLE")
-        console_title.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 10px; font-weight: bold; letter-spacing: -3px;")
+        console_title.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 10px; font-weight: bold; letter-spacing: 0px;")
         layout.addWidget(console_title)
         
         self.log_list = QListWidget()
@@ -246,7 +246,7 @@ class ScanPage(QWidget):
         self.log_list.clear()
         self.progress_bar.setValue(0)
         self.lbl_metrics.setText("Tracks: 0  |  Collabs: 0  |  Artists: 0/0  |  Time: 0s")
-        self.lbl_current_artist.setText("Current Artist: None")
+        self.lbl_current_artist.setText("")
         self.visualizer.set_state("scanning")
         self.visualizer.set_progress(0.0)
 
@@ -275,7 +275,7 @@ class ScanPage(QWidget):
             self.visualizer.set_progress(percentage)
 
     def set_current_artist(self, name: str, image: Optional[QImage] = None):
-        self.lbl_current_artist.setText(f"Current Artist: {name}")
+        self.lbl_current_artist.setText(f"Scanning: {name}" if name else "")
         self.visualizer.set_artist_image(image)
 
     def trigger_track_discovery(self, is_collab: bool):

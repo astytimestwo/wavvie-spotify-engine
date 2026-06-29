@@ -1,11 +1,13 @@
 import os
 import logging
+from datetime import datetime
 from typing import Dict, List, Optional
 from PySide6.QtCore import Qt, QThreadPool, QSettings, Slot, QDate
 from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QStackedWidget, QFrame, QLabel
 from PySide6.QtGui import QImage, QIcon, QAction, QKeySequence
 
 from ui.theme import Theme
+from ui.resources import resource_path
 from ui.widgets.sidebar import Sidebar
 from ui.widgets.toast import Toast
 from ui.pages.auth_page import AuthPage
@@ -16,7 +18,7 @@ from ui.pages.activity_page import ActivityPage
 from ui.pages.settings_page import SettingsPage
 
 from core.spotify_service import SpotifyReleaseService
-from core.models import ScanConfiguration, ScanResult, PlaylistResult
+from core.models import ScanConfiguration, ScanResult, PlaylistResult, Track
 from core.workers import AuthWorker, LoadArtistsWorker, ScanWorker, PlaylistWorker, ImageLoadWorker
 
 logger = logging.getLogger(__name__)
@@ -25,7 +27,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        self.setWindowTitle("Wavefeed - Spotify Release Dashboard")
+        self.setWindowTitle("wavvie - Spotify Release Dashboard")
+        self.setWindowIcon(QIcon(str(resource_path("wavvie.ico"))))
         self.setMinimumSize(1180, 760)
         self.setStyleSheet(Theme.get_style_sheet())
         
@@ -60,29 +63,6 @@ class MainWindow(QMainWindow):
         self.page_stack = QStackedWidget(self)
         self.content_layout.addWidget(self.page_stack)
         
-        # Bottom activity rail (persistent now-processing indicator)
-        self.activity_rail = QFrame(self)
-        self.activity_rail.setStyleSheet(f"""
-            QFrame {{
-                background-color: {Theme.SECONDARY_SURFACE};
-                border-top: 1px solid {Theme.BORDER};
-                border-bottom-right-radius: 26px;
-                min-height: 36px;
-                max-height: 36px;
-            }}
-            QLabel {{
-                color: {Theme.SECONDARY_TEXT};
-                font-size: 11px;
-                font-family: {Theme.FONT_BODY};
-                padding-left: 16px;
-            }}
-        """)
-        ar_layout = QHBoxLayout(self.activity_rail)
-        ar_layout.setContentsMargins(0, 0, 0, 0)
-        self.lbl_ar_status = QLabel("Status: Idle")
-        ar_layout.addWidget(self.lbl_ar_status)
-        
-        self.content_layout.addWidget(self.activity_rail)
         self.main_layout.addWidget(self.content_canvas, 1)
         
         # Instantiate pages
@@ -105,6 +85,8 @@ class MainWindow(QMainWindow):
         self.auth_page.auth_requested.connect(self.start_authentication)
         self.auth_page.recheck_requested.connect(self.recheck_config)
         self.dashboard_page.quick_start_requested.connect(self.quick_start_scan)
+        self.dashboard_page.cancel_scan_requested.connect(self.cancel_release_scan)
+        self.dashboard_page.view_results_requested.connect(lambda: self.switch_page(3))
         self.scan_page.start_scan_requested.connect(self.start_release_scan)
         self.scan_page.cancel_scan_requested.connect(self.cancel_release_scan)
         self.results_page.create_playlist_requested.connect(self.create_playlist)
@@ -118,6 +100,9 @@ class MainWindow(QMainWindow):
         
         # Check initial connection status
         self.recheck_config()
+
+    def set_app_status(self, status: str):
+        self.sidebar.set_status(status)
 
     def setup_shortcuts(self):
         # Ctrl+F to focus search in results
@@ -158,14 +143,16 @@ class MainWindow(QMainWindow):
 
     def show_auth_required(self):
         self.sidebar.hide()
-        self.activity_rail.hide()
+        self.auth_page.set_connected(False)
+        self.set_app_status("Not connected")
         self.switch_page(0)  # Show AuthPage
 
     def show_authenticated(self, user_data):
         self.sidebar.show()
-        self.activity_rail.show()
+        self.set_app_status("Connected")
         
         display_name = user_data.get('display_name', 'Spotify User')
+        self.auth_page.set_connected(True)
         
         # Load user avatar
         images = user_data.get('images', [])
@@ -186,7 +173,8 @@ class MainWindow(QMainWindow):
 
     def disconnect_account(self):
         self.service.disconnect()
-        self.sidebar.update_user_profile("Not Connected", None)
+        self.auth_page.set_connected(False)
+        self.sidebar.update_user_profile("", None)
         self.dashboard_page.update_user_info("")
         self.settings_page.update_connection_status("", self.service.redirect_uri)
         self.show_auth_required()
@@ -195,7 +183,7 @@ class MainWindow(QMainWindow):
     # --- ASYNC AUTH WORKER ---
     def start_authentication(self):
         self.auth_page.set_connecting(True)
-        self.lbl_ar_status.setText("Status: Connecting to Spotify...")
+        self.set_app_status("Connecting")
         
         worker = AuthWorker(self.service)
         worker.signals.finished.connect(self.on_auth_success)
@@ -205,13 +193,13 @@ class MainWindow(QMainWindow):
     @Slot(object)
     def on_auth_success(self, user_data):
         self.auth_page.set_connecting(False)
-        self.lbl_ar_status.setText("Status: Connected")
+        self.set_app_status("Connected")
         self.show_authenticated(user_data)
 
     @Slot(str)
     def on_auth_error(self, err_msg):
         self.auth_page.set_connecting(False)
-        self.lbl_ar_status.setText("Status: Connection Failed")
+        self.set_app_status("Connection failed")
         self.show_toast(f"Connection failed: {err_msg}", "error")
         self.show_auth_required()
 
@@ -239,14 +227,18 @@ class MainWindow(QMainWindow):
 
     def apply_preferences(self):
         # Refresh cutoff days, workers, etc. on the scan config forms
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         workers = settings.value("default_workers", 5, type=int)
         playlist_name = settings.value("default_playlist_name", "New Releases", type=str)
         playlist_desc = settings.value("default_playlist_desc", "New tracks from followed artists", type=str)
+        auto_export = settings.value("auto_export_json", True, type=bool)
+        auto_create = settings.value("auto_create_playlist", True, type=bool)
         
         self.scan_page.spin_workers.setValue(workers)
         self.scan_page.txt_playlist_name.setText(playlist_name)
         self.scan_page.txt_playlist_desc.setText(playlist_desc)
+        self.scan_page.chk_export.setChecked(auto_export)
+        self.scan_page.chk_create_playlist.setChecked(auto_create)
         
         # Calculate dynamic date based on cutoff days preference
         days = settings.value("default_cutoff_days", 30, type=int)
@@ -271,23 +263,27 @@ class MainWindow(QMainWindow):
 
     # --- SCAN OPERATION ---
     def quick_start_scan(self):
-        self.switch_page(2) # Switch to scan page
-        # Automatically load preferences and trigger start click
+        self.scan_origin = "home"
+        self.switch_page(1)
         self.apply_preferences()
         self.scan_page.on_start_clicked()
 
     def start_release_scan(self, config: ScanConfiguration):
+        if getattr(self, "scan_origin", None) != "home":
+            self.scan_origin = "scan"
         self.scan_page.show_active()
-        self.lbl_ar_status.setText("Status: Scanning releases...")
+        self.dashboard_page.show_scan_running(config)
+        self.set_app_status("Scanning releases")
+        self.active_scan_config = config
         
         # Persist scan ranges for playlist naming
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         settings.setValue("last_scan_start_idx", config.config.start_index if hasattr(config, 'config') else config.start_index)
         settings.setValue("last_scan_end_idx", config.config.end_index if hasattr(config, 'config') else config.end_index)
         
         # Log init params
-        self.scan_page.add_log_line(f"Starting scan: Start Index {config.start_index}, End Index {config.end_index}", Theme.SPOTIFY_GREEN)
-        self.scan_page.add_log_line(f"Cutoff Date: {config.cutoff_date_str}", Theme.SPOTIFY_GREEN)
+        self.add_scan_log_line(f"Starting scan: Start Index {config.start_index}, End Index {config.end_index}", Theme.SPOTIFY_GREEN)
+        self.add_scan_log_line(f"Cutoff Date: {config.cutoff_date_str}", Theme.SPOTIFY_GREEN)
         
         # Run scan worker
         self.scan_worker = ScanWorker(self.service, config)
@@ -306,22 +302,33 @@ class MainWindow(QMainWindow):
 
     def cancel_release_scan(self):
         self.service.cancel_scan()
-        self.scan_page.add_log_line("Cancelling scan operation cooperatively...", Theme.ERROR)
-        self.lbl_ar_status.setText("Status: Cancelling scan...")
+        self.add_scan_log_line("Cancelling scan operation cooperatively...", Theme.ERROR)
+        self.dashboard_page.show_scan_cancelled()
+        self.set_app_status("Cancelling scan")
+
+    def add_scan_log_line(self, message: str, color_hex: str = None):
+        self.scan_page.add_log_line(message, color_hex)
+        self.dashboard_page.add_scan_log_line(message, color_hex)
 
     @Slot(int, str, str)
     def on_scan_artist_started(self, idx, name, img_url):
-        self.scan_page.add_log_line(f"Scanning artist [{idx}]: {name}")
+        self.add_scan_log_line(f"Scanning artist [{idx}]: {name}")
+        self.scan_page.set_current_artist(name, None)
+        self.dashboard_page.set_scan_artist(name, None)
         
         # Retrieve image in background
         if img_url:
-            self.download_image(img_url, lambda img: self.scan_page.set_current_artist(name, img), 120)
+            def apply_artist_image(img):
+                self.scan_page.set_current_artist(name, img)
+                self.dashboard_page.set_scan_artist(name, img)
+            self.download_image(img_url, apply_artist_image, 120)
         else:
             self.scan_page.set_current_artist(name, None)
+            self.dashboard_page.set_scan_artist(name, None)
 
     @Slot(int, str, int)
     def on_scan_artist_completed(self, idx, name, count):
-        self.scan_page.add_log_line(f"Finished {name} - Found {count} releases", Theme.MUTED_TEXT)
+        self.add_scan_log_line(f"Finished {name} - Found {count} releases", Theme.MUTED_TEXT)
 
     @Slot(object)
     def on_scan_track_discovered(self, track):
@@ -330,10 +337,11 @@ class MainWindow(QMainWindow):
         color = Theme.SOFT_MINT if is_collab else Theme.CYAN_ACCENT
         
         # Log discoveries
-        self.scan_page.add_log_line(f"{role_tag} Discovered: {track.artist_name} - {track.track_name}", color)
+        self.add_scan_log_line(f"{role_tag} Discovered: {track.artist_name} - {track.track_name}", color)
         
         # Trigger visualizer pulse
         self.scan_page.trigger_track_discovery(is_collab)
+        self.dashboard_page.trigger_track_discovery(is_collab)
         
         # Download artwork asynchronously
         if track.album_artwork_url:
@@ -341,11 +349,11 @@ class MainWindow(QMainWindow):
 
     @Slot(str, str)
     def on_scan_duplicate_prevented(self, track_name, original_artist):
-        self.scan_page.add_log_line(f"Skipped Duplicate: {track_name} (already found for {original_artist})", Theme.MUTED_TEXT)
+        self.add_scan_log_line(f"Skipped Duplicate: {track_name} (already found for {original_artist})", Theme.MUTED_TEXT)
 
     @Slot(int)
     def on_scan_rate_limit(self, retry_after):
-        self.scan_page.add_log_line(f"[RATE LIMIT] Hit rate limits. Sleeping for {retry_after}s...", Theme.WARNING)
+        self.add_scan_log_line(f"[RATE LIMIT] Hit rate limits. Sleeping for {retry_after}s...", Theme.WARNING)
 
     @Slot(object)
     def on_scan_progress(self, progress_tuple):
@@ -353,28 +361,53 @@ class MainWindow(QMainWindow):
         prog_type, data = progress_tuple
         if prog_type == "progress":
             self.scan_page.update_scan_progress(data)
+            self.dashboard_page.update_scan_progress(data)
 
     @Slot(object)
     def on_scan_completed(self, result: ScanResult):
-        self.scan_page.add_log_line("Scan completed successfully!", Theme.SPOTIFY_GREEN)
-        self.lbl_ar_status.setText("Status: Scan Complete")
+        self.add_scan_log_line("Scan completed successfully!", Theme.SPOTIFY_GREEN)
+        self.set_app_status("Scan complete")
         self.show_toast("Scan completed!", "success")
         
         # Populate Results Page
         self.results_page.set_results(result.tracks)
-        self.switch_page(3) # Switch to Results page
+        if getattr(self, "scan_origin", None) != "home":
+            self.switch_page(3) # Switch to Results page
         
         # Persist stats summary
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
+        active_config = getattr(self, "active_scan_config", None)
+        actual_start = getattr(result, "start_index", None)
+        if not actual_start or (actual_start == 1 and active_config and active_config.start_index != 1):
+            actual_start = getattr(active_config, "start_index", 1)
+        actual_end = getattr(result, "end_index", None)
+        if not actual_end or actual_end == 9999:
+            actual_end = actual_start + max(0, result.total_artists - 1)
+        settings.setValue("last_scan_start_idx", actual_start)
+        settings.setValue("last_scan_end_idx", actual_end)
         settings.setValue("last_scan_date", datetime.now().strftime("%Y-%m-%d %H:%M"))
         settings.setValue("last_scan_tracks", len(result.tracks))
         self.dashboard_page.load_dashboard_settings()
+        self.dashboard_page.show_scan_complete(result)
+
+        config = getattr(self, "active_scan_config", None)
+        if config and config.export_json:
+            self.export_json(result.tracks)
+        if config and config.create_playlist_auto:
+            self.create_playlist(result.tracks)
 
     @Slot(str)
     def on_scan_error(self, err_msg):
-        self.scan_page.add_log_line(f"Scan Stopped: {err_msg}", Theme.ERROR)
-        self.lbl_ar_status.setText("Status: Scan Failed")
-        self.show_toast(f"Scan failed: {err_msg}", "error")
+        self.add_scan_log_line(f"Scan Stopped: {err_msg}", Theme.ERROR)
+        is_cancelled = "cancel" in err_msg.lower()
+        self.set_app_status("Scan cancelled" if is_cancelled else "Scan failed")
+        if is_cancelled:
+            if getattr(self.dashboard_page, "scan_state", None) != "cancelled":
+                self.dashboard_page.show_scan_cancelled()
+            self.show_toast("Scan cancelled.", "warning")
+        else:
+            self.dashboard_page.show_scan_failed(err_msg)
+            self.show_toast(f"Scan failed: {err_msg}", "error")
         self.scan_page.show_config()
 
     # --- PLAYLIST & JSON EXPORTS ---
@@ -383,13 +416,13 @@ class MainWindow(QMainWindow):
             self.show_toast("No tracks selected.", "warning")
             return
             
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         config = ScanConfiguration(
             playlist_name=settings.value("default_playlist_name", "New Releases", type=str),
             playlist_description=settings.value("default_playlist_desc", "New tracks from followed artists", type=str)
         )
         
-        self.lbl_ar_status.setText("Status: Creating Spotify Playlist...")
+        self.set_app_status("Creating playlist")
         
         # Trigger background playlist creator worker
         # Use first and last indices as ranges
@@ -406,7 +439,7 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def on_playlist_created(self, result: PlaylistResult):
-        self.lbl_ar_status.setText("Status: Playlist Created")
+        self.set_app_status("Playlist created")
         self.show_toast(f"Playlist '{result.playlist_name}' created successfully!", "success")
 
     def export_json(self, tracks: List[Track]):
@@ -414,7 +447,7 @@ class MainWindow(QMainWindow):
             self.show_toast("No tracks selected.", "warning")
             return
             
-        settings = QSettings("Wavefeed", "SpotifyPlaylistCreator")
+        settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         start_idx = settings.value("last_scan_start_idx", 1, type=int)
         end_idx = settings.value("last_scan_end_idx", 9999, type=int)
         

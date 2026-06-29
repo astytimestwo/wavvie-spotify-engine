@@ -18,14 +18,19 @@ class Theme:
     CYAN_ACCENT = "#55DDE0"
     WARNING = "#F5C451"
     ERROR = "#FF627D"
+    POPPY = "#F24A3D"
+    POPPY_HOVER = "#FF5C4E"
     
     # Fonts
     FONT_HEADINGS = "Loubag"
-    FONT_BODY = "Futura PT"
+    FONT_BODY = "Agrandir"
     FONT_MONO = "Agrandir"
 
     @classmethod
     def get_style_sheet(cls) -> str:
+        from ui.resources import resource_path
+
+        checkmark_icon = str(resource_path("checkmark.svg")).replace("\\", "/")
         return f"""
             /* Base Widget Styles */
             QWidget {{
@@ -174,10 +179,10 @@ class Theme:
             }}
             
             QCheckBox::indicator {{
-                width: 20px;
-                height: 20px;
-                border: 1px solid {cls.BORDER};
-                border-radius: 6px;
+                width: 22px;
+                height: 22px;
+                border: 2px solid {cls.BORDER};
+                border-radius: 7px;
                 background-color: {cls.SECONDARY_SURFACE};
             }}
             
@@ -186,9 +191,14 @@ class Theme:
             }}
             
             QCheckBox::indicator:checked {{
-                background-color: {cls.VIOLET_ACCENT};
-                border-color: {cls.VIOLET_ACCENT};
-                image: url(data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>);
+                background-color: {cls.SPOTIFY_GREEN};
+                border-color: {cls.SPOTIFY_GREEN};
+                image: url("{checkmark_icon}");
+            }}
+
+            QCheckBox::indicator:checked:hover {{
+                background-color: {cls.SPOTIFY_HOVER};
+                border-color: {cls.SPOTIFY_HOVER};
             }}
             
             /* Custom Cards style */

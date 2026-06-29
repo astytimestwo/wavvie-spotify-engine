@@ -613,7 +613,9 @@ class SpotifyReleaseService:
                 tracks=all_tracks,
                 duplicates_prevented=duplicates_count,
                 total_artists=len(artists_to_process),
-                total_tracks=len(all_tracks)
+                total_tracks=len(all_tracks),
+                start_index=config.start_index,
+                end_index=actual_end
             )
             
             self.trigger_callback("scan_completed", result)

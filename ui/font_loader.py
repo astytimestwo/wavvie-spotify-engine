@@ -1,32 +1,22 @@
-import sys
 import zipfile
-from pathlib import Path
 
 from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QFontDatabase
 
+from ui.resources import resource_path
 
 FONT_ARCHIVES = (
     "loubag-regular-1782520865-0.zip",
     "loubag-ultralight-1782520861-0.zip",
     "Agrandir-Font-Family.zip",
-    "futura-pt.zip",
 )
-
-
-def resource_root() -> Path:
-    bundle_root = getattr(sys, "_MEIPASS", None)
-    if bundle_root:
-        return Path(bundle_root)
-    return Path(__file__).resolve().parents[1]
 
 
 def load_bundled_fonts() -> set[str]:
     loaded_families: set[str] = set()
-    fonts_dir = resource_root() / "resources"
 
     for archive_name in FONT_ARCHIVES:
-        archive_path = fonts_dir / archive_name
+        archive_path = resource_path(archive_name)
         if not archive_path.exists():
             continue
 

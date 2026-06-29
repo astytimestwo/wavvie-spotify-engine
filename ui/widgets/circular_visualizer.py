@@ -223,7 +223,7 @@ class CircularVisualizer(QWidget):
             painter.setPen(QPen(QColor(Theme.STRONG_TEXT)))
             font = painter.font()
             font.setFamily(Theme.FONT_HEADINGS)
-            font.setPointSize(18)
+            font.setPointSize(14 if self.state != "scanning" else 18)
             font.setBold(True)
             painter.setFont(font)
             
@@ -234,7 +234,7 @@ class CircularVisualizer(QWidget):
                 painter.drawText(rect, Qt.AlignCenter, progress_text)
             else:
                 rect = QRectF(center.x() - disc_radius, center.y() - disc_radius, disc_radius * 2, disc_radius * 2)
-                painter.drawText(rect, Qt.AlignCenter, "WAVE")
+                painter.drawText(rect, Qt.AlignCenter, "wavvie")
                 
         painter.restore()
         

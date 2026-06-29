@@ -1,8 +1,9 @@
 import os
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFrame, QHBoxLayout, QGridLayout
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPixmap
 from ui.theme import Theme
+from ui.resources import resource_path
 from main import load_environment
 
 class AuthPage(QWidget):
@@ -11,23 +12,19 @@ class AuthPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.is_connected = False
         
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(40, 60, 40, 60)
         self.main_layout.setAlignment(Qt.AlignCenter)
         
         # 1. Logo area
-        self.logo_label = QLabel("WAVEFEED")
+        self.logo_label = QLabel()
         self.logo_label.setAlignment(Qt.AlignCenter)
-        self.logo_label.setStyleSheet(f"""
-            color: {Theme.SPOTIFY_GREEN};
-            font-family: {Theme.FONT_HEADINGS};
-            font-size: 40px;
-            font-weight: bold;
-            letter-spacing: -3px;
-            margin-bottom: 8px;
-        """)
-        self.main_layout.addWidget(self.logo_label)
+        self.logo_label.setFixedSize(280, 104)
+        logo_pixmap = QPixmap(str(resource_path("wavvie_wordmark_white.png")))
+        self.logo_label.setPixmap(logo_pixmap.scaled(280, 104, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.main_layout.addWidget(self.logo_label, 0, Qt.AlignCenter)
         
         # 2. Heading
         self.heading_label = QLabel("Your followed artists, filtered properly.")
@@ -89,21 +86,35 @@ class AuthPage(QWidget):
             self.show_setup_view(client_id, client_secret, redirect_uri)
 
     def show_connect_view(self, redirect_uri: str):
-        self.btn_connect = QPushButton("Connect Spotify Account")
+        button_text = "Connected" if self.is_connected else "Connect Spotify Account"
+        self.btn_connect = QPushButton(button_text)
         self.btn_connect.setProperty("class", "primary")
         self.btn_connect.setCursor(Qt.PointingHandCursor)
         self.btn_connect.setMinimumSize(240, 50)
-        self.btn_connect.clicked.connect(self.auth_requested.emit)
+        self.btn_connect.setEnabled(not self.is_connected)
+        if self.is_connected:
+            self.btn_connect.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.POPPY};
+                    border: 1px solid {Theme.POPPY};
+                    color: {Theme.STRONG_TEXT};
+                    border-radius: 16px;
+                    font-family: {Theme.FONT_BODY};
+                    font-weight: 800;
+                }}
+            """)
+        else:
+            self.btn_connect.clicked.connect(self.auth_requested.emit)
         
         self.content_layout.addWidget(self.btn_connect, 0, Qt.AlignCenter)
         
         status_label = QLabel(f"Redirect URI status: Listening on {redirect_uri}")
-        status_label.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 11px; margin-top: 16px;")
+        status_label.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 12px; margin-top: 16px;")
         status_label.setAlignment(Qt.AlignCenter)
         self.content_layout.addWidget(status_label)
         
         privacy_label = QLabel("Credentials remain local inside your environment variables (.env file).")
-        privacy_label.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 11px; margin-top: 4px;")
+        privacy_label.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 12px; margin-top: 4px;")
         privacy_label.setAlignment(Qt.AlignCenter)
         self.content_layout.addWidget(privacy_label)
 
@@ -192,3 +203,7 @@ class AuthPage(QWidget):
         if self.btn_connect:
             self.btn_connect.setEnabled(not connecting)
             self.btn_connect.setText("Connecting Spotify..." if connecting else "Connect Spotify Account")
+
+    def set_connected(self, connected: bool):
+        self.is_connected = connected
+        self.update_ui_state()
