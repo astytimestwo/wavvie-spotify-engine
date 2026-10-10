@@ -1,6 +1,6 @@
 # wavvie repository mind map
 
-Last assessed: 2026-09-06. This is a working map of the implementation, not a proposed redesign. Update it when flows, contracts, persistence, or known issues change. Source code remains authoritative.
+Last assessed: 2026-10-10. This is a working map of the implementation, not a proposed redesign. Update it when flows, contracts, persistence, or known issues change. Source code remains authoritative.
 
 ## Purpose and current shape
 
@@ -64,11 +64,10 @@ mindmap
 | `ui/pages/results_page.py` | Track rows, text/type/role filters, checkboxes, details, Spotify links, manual export/playlist signals. |
 | `ui/pages/activity_page.py` | Bridges Python logging to a filterable, copyable, in-memory activity log. |
 | `ui/pages/settings_page.py` | Persists preferences; emits disconnect/cache-clear/settings-change requests. |
-| `ui/theme.py`, `ui/widgets/*` | Shared styling, sidebar, toasts, animated visualizer. `stats_charts.py` contains chart widgets but has no imports from other current Python modules. |
+| `ui/theme.py`, `ui/widgets/*` | Shared styling, sidebar, elided labels, animated visualizer. |
 | `ui/resources.py`, `ui/font_loader.py` | Resolves source versus PyInstaller resource paths; loads Loubag/Agrandir fonts directly from bundled ZIPs. |
 | `Wavefeed.spec` | Packages `app.py` and explicit font/branding assets into windowed `dist/wavvie.exe`; spec filename retains an older name. |
-| `resources/main.py` | Older standalone CLI implementation. Not imported by the current entry points or included as the executable entry point. Avoid maintaining a second copy of business logic here. |
-| `codex_spotify_ui_prompt.md` | Existing untracked design prompt describing React/FastAPI/SSE and different fonts. It does not describe the implemented architecture and is not an instruction to migrate it. |
+| `tests/fake_spotify.py` | In-memory Spotify Web API transport for tests; enforces the Development Mode limits and routes listed below. |
 
 ## End-to-end relations
 
@@ -108,29 +107,42 @@ flowchart TD
 2. Load cached followed artists unless refresh is requested. Fresh API data is paginated in groups of 50, sorted case-insensitively by name, and cached.
 3. Apply a **1-based inclusive** artist range. End is clamped to the followed-artist count. Defaults are start 1 and end 9999, so “all” is a practical sentinel rather than unlimited.
 4. Submit artists to a ThreadPoolExecutor, default 5 workers. Each artist runs album discovery followed by collaboration searches.
-5. Album discovery accepts `album`, `single`, `ep`, `appears_on` values; rejects compilation types and a hardcoded list of title substrings. Pages use limit 50. Stop on a short page or three consecutive empty/nonqualifying/error pages.
+5. Album discovery requests the `album`, `single` and `appears_on` groups separately (compilations are rejected anyway), 10 releases per page, skipping repeated listings of an album ID. It rejects compilation types and a hardcoded list of title substrings. A group stops on a short page, after 200 releases, on a request error, or once a page passes the cutoff while that group's dates have arrived newest first; out-of-order dates make it read on.
 6. Cutoff is **inclusive**: release dates before cutoff are rejected. Year-only dates become January 1; year-month dates become the first of that month. There is no upper date bound.
 7. Album tracks must explicitly credit the followed artist's Spotify ID. Album artist membership determines main versus featured role. Collaboration means the followed artist is absent from album-level artist credits, not simply that multiple performers exist.
-8. Collaboration discovery runs six queries using feat/featuring/ft/with/remix/mix, up to 200 results per query. It checks cutoff, compilation rules, performer ID, title substrings, and absence from album-level main artists. This is heuristic discovery, not an exhaustive collaboration catalog.
+8. Collaboration discovery runs six queries using feat/featuring/ft/with/remix/mix, each limited with a `year:` filter from the cutoff year to the current year, up to 30 results (3 pages of 10) per query. It checks cutoff, compilation rules, performer ID, title substrings, and absence from album-level main artists. This is heuristic discovery, not an exhaustive collaboration catalog.
 9. Signature = lowercase track name plus sorted lowercase performer names, joined by `|`. No whitespace/version normalization, ISRC matching, or artist-ID-based signature is applied.
 10. Within an artist's album results, prefer album, then single, EP, compilation, unknown; tie-break by earliest release-date string. Search results only supplement signatures absent from album results.
 11. Across artists, first completed result wins for each signature. Global selection does not reapply album-version priority. Final tracks sort descending by their original release-date strings.
+12. The API reports EPs as singles. A single with four or more tracks is labelled `ep`, as Spotify's apps do, for both album and search discoveries.
+
+### Spotify Web API constraints
+
+Checked against Spotify's reference and February 2026 migration guide on 2026-10-10. They apply to Development Mode apps (every app without extended quota; existing apps were migrated on 2026-03-09):
+
+- `GET /search` and `GET /artists/{id}/albums` accept `limit` 1–10. `GET /albums/{id}/tracks` and `GET /me/following` still accept up to 50.
+- Playlists are created with `POST /me/playlists`; `POST /users/{id}/playlists` was removed. Items are added with `POST /playlists/{id}/items`, at most 100 per request; spotipy 2.26.0 is the first release using the `/items` routes.
+- The app owner needs Spotify Premium, and an app has at most five users.
+- The migration guide removes `album_group` from album objects (the artist-albums reference still lists it as deprecated) and `followers`/`popularity` from artist objects. wavvie relies on none of them.
+
+These limits are encoded in `tests/fake_spotify.py`. No live Spotify run has confirmed them yet; recheck Spotify's changelog for anything newer.
 
 ### Desktop orchestration
 
 - Startup checks credentials; an existing `.spotifycache` triggers authentication. Successful auth loads followed artists in the background and opens Home.
+- Without a valid cached token, spotipy opens the browser and waits, with no timeout, for one request to the local redirect URI. **Cancel sign-in** and window close release that wait by sending the callback server an `error=cancelled` redirect, which spotipy treats as a refused sign-in; close repeats it until the auth worker finishes.
 - Quick Start applies saved preferences to the scan form and starts from Home. Custom Scan gathers the form values. Both use the same service and update Home plus Scan progress.
 - Successful scans populate Results, persist summary/range, and run automatic export/playlist actions according to active scan flags. Home-origin scans stay on Home; other scans navigate to Results.
 - Manual Results actions gather checked, visible list items. Hidden rows are excluded, and selection counts report the same subset.
 - The window-owned Qt pool has a maximum of 10 threads for jobs/images. A scan job creates its own Python artist pool. Service callbacks bridge to signals; widgets should receive updates through these signals.
 - Callback registry allows **one callback per event**. Worker adapters temporarily bind and restore callbacks. MainWindow serializes service operations; image jobs may run concurrently.
-- Cancellation is cooperative. API attempts and scanning loops check a flag; running requests, some sleeps, and executor cleanup can delay completion. Cancelled scans return no ScanResult.
+- Cancellation is cooperative. API attempts and scanning loops check a flag; running requests, some sleeps, and executor cleanup can delay completion. Cancelled scans return no ScanResult, and warnings raised after cancellation is requested are dropped.
 
 ### Outputs and side effects
 
-- CLI always attempts JSON export and playlist creation after a successful scan; its arguments do not expose opt-out flags. Desktop controls the automatic actions and also offers manual ones.
+- CLI attempts JSON export and playlist creation after a successful scan that found tracks; its arguments do not expose opt-out flags. A scan without new releases skips both. Desktop controls the automatic actions and also offers manual ones.
 - JSON is written into the current working directory as `tracklist_START_END_TIMESTAMP.json`, with metadata and a simplified track list. It includes `has_artwork` but omits the artwork URL, album ID, and followed-artist ID; it is not a complete serialized Track object.
-- Playlist creation creates a new private playlist, adds a range suffix to its name in most actual-range cases, and adds track IDs in batches of 100. There is no rollback or resume record on partial failure.
+- Playlist creation creates a new private playlist with `POST /me/playlists` and adds track IDs in batches of 100. The name gets an "(Artists X-Y)" suffix only when the scan did not cover every followed artist; scan results record the followed-artist count for this. There is no rollback or resume record on partial failure.
 - API wrapper defaults: 3 attempts, 1.2 seconds after successful calls, Retry-After waits for 429, exponential waits for server/other errors. Throttling is per call/thread, not a global request budget. Some auth calls bypass this wrapper.
 
 ## State and configuration
@@ -143,7 +155,7 @@ flowchart TD
 | Desktop preferences | QSettings organization `wavvie`, application `SpotifyPlaylistCreator`; workers, playlist name/description, auto actions, cutoff days/index, reduced motion. Platform-native storage, normally Windows registry here. |
 | Saved summaries | Same QSettings namespace: last scan date/count/range and followed-artist count. Full scan results/history are not persisted there. |
 | Working data | Service account/client state, active config, results rows, activity logs, and URL-keyed image caches live in memory. |
-| Build/runtime dependencies | Unpinned `spotipy`, `requests`, `python-dotenv`, `PySide6`, `pillow`, `pyinstaller` in requirements.txt; runtime and build dependencies share one file. |
+| Build/runtime dependencies | `spotipy>=2.26.0` (the `/items` playlist routes); unpinned `requests`, `python-dotenv`, `PySide6`, `pillow`, `pyinstaller` in requirements.txt; runtime and build dependencies share one file. |
 
 Credentials, caches, exports, virtual environments, and build outputs are gitignored. Never add credential/token values to this map. No tracked CI workflow was found during this assessment.
 
@@ -169,10 +181,9 @@ The UI/UX pass on 2026-09-06 resolved the original duplicate-count, artwork impo
 
 ### Remaining scope boundaries
 
-- Discovery heuristics, global first-completed signature selection, and API classification/search completeness are unchanged. No live Spotify API/OAuth compatibility claim is made by these UI tests.
+- Discovery heuristics (queries, title keywords, signatures, first-completed global selection) are unchanged apart from the paging that Development Mode limits require. No live Spotify API/OAuth run has verified the 2026-10-10 changes.
 - Full results and activity history remain session-only. A created or partially populated playlist has no rollback/resume mechanism; its link is retained for inspection.
-- Authentication may wait for the browser callback; cooperative shutdown waits for active work. This is not instant cancellation of an external sign-in.
-- The legacy `resources/main.py` and untracked web design prompt remain reference material.
+- Token, artist-cache and automatic-export files are relative to the working directory, so a packaged app started with an unexpected working directory writes them there.
 
 ## Validation baseline
 
@@ -180,7 +191,11 @@ The original assessment ran 19 tests with two QSettings failures in the sandbox.
 
 Automated layout checks exercise every page at 1000×640, 1280×820, and 1600×1000 with bundled fonts, plus long track names. The suite captures unhandled Qt slot errors rather than treating a printed traceback as a pass. Tests make no live Spotify requests and do not inspect screenshots manually.
 
-Final validation on 2026-09-06: **50 tests passed**, plus the layout test at **150% display scaling**. A 1,000-track result set showed its initial 50-row batch in 0.10 seconds and finished in 2.33 seconds with event-loop yields. The image-completion test repeats five jobs and checks UI-thread delivery and worker cleanup. Use `python -m unittest discover -s tests -v`; the desktop regression module selects Qt's offscreen platform. On Windows, run in an environment that permits temporary-file creation and cleanup. `git diff --check` should also pass.
+Validation on 2026-09-06: 50 tests passed, plus the layout test at 150% display scaling. The image-completion test in that suite was flaky: it asserted worker cleanup before the separately queued cleanup slot had run, failing in about a third of runs on 2026-10-10.
+
+`tests/test_spotify_web_api.py` runs the real spotipy client against `tests/fake_spotify.py`, which enforces the Development Mode limits above. `tests/test_cli.py` covers CLI orchestration with a stand-in service. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
+
+Final validation on 2026-10-10: **68 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. A 1,000-track result set showed its initial 50-row batch in 0.11–0.33 seconds and finished in 2.5–3.9 seconds with event-loop yields; under heavy machine load that test can exceed its 1 s and 8 s limits. The image-completion test now waits for both the UI-thread callback and worker release (30 of 30 isolated runs passed). Use `python -m unittest discover -s tests -v`; the desktop regression module selects Qt's offscreen platform. On Windows, run in an environment that permits temporary-file creation and cleanup. `git diff --check` should also pass.
 
 ## Where to work next
 

@@ -23,6 +23,7 @@ wavvie is a desktop and CLI tool for discovering new Spotify releases from follo
    - Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
    - Create an app to get your `Client ID` and `Client Secret`.
    - Set the Redirect URI to `http://127.0.0.1:8888/callback`.
+   - New Spotify apps run in Development Mode. Since February 2026 the app owner needs Spotify Premium, at most five users can use the app, and search and artist-album requests return at most 10 items per page, so scans make more, smaller requests.
 
 2. **Environment Variables**:
    - Copy `.env.example` to `.env`.
@@ -77,7 +78,7 @@ Double-click **`run.bat`**. This will:
 
 - `--start`: Start index of your followed artists (default: 1).
 - `--end`: End index of your followed artists (default: all).
-- `--cutoff`: Only include tracks released after this date (YYYY-MM-DD).
+- `--cutoff`: Only include tracks released on or after this date (YYYY-MM-DD, default: 30 days ago).
 - `--refresh`: Refresh the local followed-artist cache.
 - `--verbose`: Enable detailed logging.
 
@@ -89,6 +90,7 @@ Do not commit `.env`, `.spotifycache`, `followed_artists_cache.json`, `tracklist
 
 - Quick Scan uses your saved date and output preferences for all followed artists. Custom scans let you choose an alphabetical artist range.
 - Only one Spotify operation runs at a time. You can navigate while scanning; cancellation waits for current requests to finish.
+- While connecting, **Cancel sign-in** stops waiting for the browser (for example after closing the tab or seeing a redirect URI error). Closing the window does the same.
 - Results explain empty scans and unmatched searches. Selection counts, export, and playlist creation use checked tracks visible under the current filters.
 - Manual export opens a save dialog. Completed exports and playlists have persistent links on Results. Partial playlist failures show the confirmed count and a link to check Spotify before retrying.
 - Settings save automatically, and reduced motion disables the release animation and rotating tips. Ctrl+F opens Results search; Ctrl+L opens Activity.
@@ -104,9 +106,11 @@ git diff --check
 
 The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary INI preferences, and mocked Spotify responses. It covers real widget interactions, worker completion, cancellation, shutdown, settings, outputs, long text, large results, and layouts at 1000×640, 1280×820, and 1600×1000. No account credentials or real playlists are needed. Temporary-file creation and cleanup must be permitted by the execution environment.
 
-Validation on 2026-09-06: **50 tests passed**, plus the layout test at **150% display scaling**. The 1,000-track check produced its first 50 rows in 0.10 seconds and finished loading in 2.33 seconds while yielding between batches. These timings describe the local test machine, not a universal performance guarantee. Live Spotify integration and packaged executable behavior were not revalidated in this UI pass.
+Service tests run the real spotipy client against `tests/fake_spotify.py`, an in-memory transport that enforces the documented Development Mode page limits and playlist routes. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
 
-See [mindmap.md](mindmap.md) for the implementation map, data flow, and remaining integration boundaries. The legacy web UI prompt is separate from this native desktop implementation.
+Validation on 2026-10-10: **68 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. The 1,000-track check showed its first 50 rows in 0.11–0.33 seconds and finished loading in 2.5–3.9 seconds. These timings describe the local test machine; under heavy machine load the large-results test can exceed its limits. No Spotify account was used, so live API behaviour and the packaged executable remain unverified.
+
+See [mindmap.md](mindmap.md) for the implementation map, data flow, Spotify API constraints, and remaining integration boundaries.
 
 ## License
 
