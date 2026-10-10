@@ -31,7 +31,12 @@ def run(command, title, env=None, timeout=None):
 
 
 def test():
-    code, output = run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-v'], 'Tests failed')
+    # faulthandler prints every thread's stack if the process crashes, starting with the crashing thread.
+    code, output = run([sys.executable, '-X', 'faulthandler', '-m', 'unittest', 'discover', '-s', 'tests', '-v'],
+                       'Tests failed')
+    crash = output.find('Fatal Python error')
+    if crash >= 0:
+        annotate('Crash', output[crash:crash + 3000])
     if code:
         failures = [block.strip() for block in output.split('=' * 70) if block.strip().startswith(('FAIL:', 'ERROR:'))]
         for block in failures[:8]:
