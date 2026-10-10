@@ -232,6 +232,18 @@ class SpotifyWebApiTests(unittest.TestCase):
         self.assertFalse(created['body']['public'])
         self.assertEqual(created['items'], [f'spotify:track:t{n}' for n in range(150)])
 
+    def test_playlist_description_mentions_the_range_only_for_partial_scans(self):
+        song = Track('t1', 'Song', 'Album', 'a', 'single', '2026-09-01', 'Nova', 'nova',
+                     False, 'main', ['Nova'], 'song|nova')
+        config = ScanConfiguration(playlist_description='Made with wavvie.')
+
+        full = self.service.create_playlist([song], config, 1, 5, followed_artists=5)
+        partial = self.service.create_playlist([song], config, 2, 5, followed_artists=5)
+
+        self.assertEqual(self.api.playlists[full.playlist_id]['body']['description'], 'Made with wavvie.')
+        self.assertEqual(self.api.playlists[partial.playlist_id]['body']['description'],
+                         'Made with wavvie. - Range: 2-5')
+
 
 if __name__ == '__main__':
     unittest.main()

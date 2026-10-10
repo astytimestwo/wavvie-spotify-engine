@@ -3,7 +3,7 @@ import sys
 import argparse
 import logging
 from datetime import datetime, timedelta
-from dotenv import dotenv_values
+from dotenv import dotenv_values, set_key
 
 from core.models import ScanConfiguration, ScanResult
 from core.spotify_service import SpotifyReleaseService
@@ -52,6 +52,14 @@ def load_environment(refresh=False):
             if value is not None and key not in os.environ:
                 os.environ[key] = value
                 _loaded_environment[key] = value
+
+def save_environment(values, path=None):
+    """Write Spotify settings to .env (the first search location by default) and load them."""
+    path = str(path or dotenv_search_paths()[0])
+    for key, value in values.items():
+        set_key(path, key, value)
+    load_environment(refresh=True)
+    return path
 
 # Load env variables before importing or checking configuration
 load_environment()

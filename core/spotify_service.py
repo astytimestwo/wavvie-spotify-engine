@@ -769,13 +769,16 @@ class SpotifyReleaseService:
             covers_all_artists = start_index == 1 and (end_index == 9999 or 0 < followed_artists <= end_index)
             range_suffix = "" if covers_all_artists else f" (Artists {start_index}-{end_index})"
             playlist_name = config.playlist_name + range_suffix
+            description = config.playlist_description
+            if not covers_all_artists:
+                description += f" - Range: {start_index}-{end_index}"
             
             # POST /me/playlists; Spotify removed per-user playlist creation for Development Mode apps.
             playlist = self.safe_api_call(
                 self.sp.current_user_playlist_create,
                 name=playlist_name,
                 public=False,
-                description=f"{config.playlist_description} - Range: {start_index}-{end_index}",
+                description=description,
                 _retry_uncertain=False
             )
             playlist_id = playlist['id']
