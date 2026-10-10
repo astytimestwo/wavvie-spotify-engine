@@ -23,6 +23,7 @@ a = Analysis(
         ('resources/wavvie_mark_16.png', 'resources'),
         ('resources/wavvie.ico', 'resources'),
         ('resources/checkmark.svg', 'resources'),
+        ('resources/chevron_down.svg', 'resources'),
     ],
     hiddenimports=[],
     hookspath=[],
