@@ -145,6 +145,23 @@ class SpotifyWebApiTests(unittest.TestCase):
 
         self.assertEqual([t['track_id'] for t in tracks], ['t1'])
 
+    def test_features_found_on_albums_name_the_releasing_artist(self):
+        self.api.artist_albums['nova'] = {'appears_on': [album('sky', 'Sky', 'album', '2026-10-02', [KITE])]}
+        self.api.album_tracks['sky'] = [track('t1', 'Baby Breath (feat. Nova)', [KITE, NOVA])]
+
+        tracks = self.service.get_new_tracks('nova', 'Nova', CUTOFF)
+
+        self.assertEqual([(t['main_artist'], t['performer_role']) for t in tracks], [('Kite', 'featured')])
+
+    def test_artist_summary_counts_features_found_on_albums(self):
+        self.api.artist_albums['nova'] = {'appears_on': [album('sky', 'Sky', 'album', '2026-10-02', [KITE])]}
+        self.api.album_tracks['sky'] = [track('t1', 'Baby Breath (feat. Nova)', [KITE, NOVA])]
+
+        with self.assertLogs('core.spotify_service', level='INFO') as logs:
+            self.service.get_new_tracks('nova', 'Nova', CUTOFF)
+
+        self.assertTrue(any('for Nova (1 collaborations)' in line for line in logs.output), logs.output)
+
     def test_repeated_album_listings_are_scanned_once(self):
         glow = album('glow', 'Glow', 'single', '2026-09-12', [NOVA])
         self.api.artist_albums['nova'] = {'single': [glow, glow]}

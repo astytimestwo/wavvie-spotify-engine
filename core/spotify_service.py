@@ -366,6 +366,7 @@ class SpotifyReleaseService:
                             'release_date': album_info.get('release_date'),
                             'artist_name': album_info.get('artists', [{}])[0].get('name', 'Unknown Artist'),
                             'followed_artist_id': followed_artist_id,
+                            'main_artist': None if is_followed_main_artist else album_info.get('artists', [{}])[0].get('name', 'Unknown Artist'),
                             'is_collaboration': not is_followed_main_artist,
                             'performer_role': 'main' if is_followed_main_artist else 'featured',
                             'all_artists': all_artists,
@@ -555,13 +556,12 @@ class SpotifyReleaseService:
             all_tracks.append(best)
             
         collabs = self.get_artist_collaborations(artist_id, artist_name, cutoff_date)
-        collab_count = 0
         for track in collabs:
             sig = track['track_signature']
             if sig not in track_versions:
                 all_tracks.append(track)
-                collab_count += 1
-                
+        collab_count = sum(1 for track in all_tracks if track['is_collaboration'])
+
         logger.info(f"Found {len(all_tracks)} unique tracks for {artist_name} ({collab_count} collaborations)")
         return all_tracks
 
