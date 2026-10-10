@@ -60,8 +60,9 @@ class BrowserSignIn:
         return self.browser_opened.called
 
     def redirect_back(self, error):
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         try:
-            urllib.request.urlopen(f'{self.redirect_uri}?error={error}', timeout=1).close()
+            opener.open(f'{self.redirect_uri}?error={error}', timeout=1).close()
         except OSError:
             pass
 
