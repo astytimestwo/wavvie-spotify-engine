@@ -281,6 +281,13 @@ class SpotifyReleaseService:
     def should_include_album_type(self, album_type: str) -> bool:
         return album_type.lower() in ['album', 'single', 'ep', 'appears_on']
 
+    def release_type(self, album_info: Dict[str, Any]) -> str:
+        # The API reports EPs as singles; Spotify's apps label singles with 4 or more tracks as EPs.
+        album_type = album_info.get('album_type', 'unknown').lower()
+        if album_type == 'single' and (album_info.get('total_tracks') or 0) >= 4:
+            return 'ep'
+        return album_type
+
     def get_album_tracks(self, album_id: str, album_info: Dict[str, Any], followed_artist_id: str) -> List[Dict[str, Any]]:
         tracks = []
         offset = 0
@@ -314,7 +321,7 @@ class SpotifyReleaseService:
                             'track_name': track.get('name', 'Unknown Track'),
                             'album_name': album_info.get('name', 'Unknown Album'),
                             'album_id': album_id,
-                            'album_type': album_info.get('album_type', 'unknown'),
+                            'album_type': self.release_type(album_info),
                             'album_artwork_url': album_artwork_url,
                             'release_date': album_info.get('release_date'),
                             'artist_name': album_info.get('artists', [{}])[0].get('name', 'Unknown Artist'),
@@ -460,7 +467,7 @@ class SpotifyReleaseService:
                                     'track_name': track.get('name', 'Unknown Track'),
                                     'album_name': album.get('name', 'Unknown Album'),
                                     'album_id': album.get('id'),
-                                    'album_type': album.get('album_type', 'unknown'),
+                                    'album_type': self.release_type(album),
                                     'album_artwork_url': album_artwork_url,
                                     'release_date': album.get('release_date'),
                                     'artist_name': artist_name,

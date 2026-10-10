@@ -95,6 +95,27 @@ class SpotifyWebApiTests(unittest.TestCase):
         self.assertEqual([t['track_name'] for t in tracks], ['Glow'])
         self.assertEqual(len(self.api.requested('GET', '/albums/glow/tracks')), 1)
 
+    def test_singles_with_four_or_more_tracks_are_labelled_ep(self):
+        self.api.artist_albums['nova'] = {'single': [
+            album('drive', 'Night Drive', 'single', '2026-09-12', [NOVA], total_tracks=4),
+            album('glow', 'Glow', 'single', '2026-09-10', [NOVA], total_tracks=2),
+        ]}
+        self.api.album_tracks['drive'] = [track(f'drive{n}', f'Drive {n}', [NOVA]) for n in range(4)]
+        self.api.album_tracks['glow'] = [track('glow1', 'Glow', [NOVA]), track('glow2', 'Glow (Edit)', [NOVA])]
+
+        tracks = self.service.get_new_tracks('nova', 'Nova', CUTOFF)
+
+        self.assertEqual({(t['album_name'], t['album_type']) for t in tracks},
+                         {('Night Drive', 'ep'), ('Glow', 'single')})
+
+    def test_features_on_four_track_singles_are_labelled_ep(self):
+        on_ep = album('kite-ep', 'Kite EP', 'single', '2026-09-20', [KITE], total_tracks=5)
+        self.api.search_tracks = [track('feature1', 'Wings (feat. Nova)', [KITE, NOVA], on_ep)]
+
+        collaborations = self.service.get_artist_collaborations('nova', 'Nova', CUTOFF)
+
+        self.assertEqual([t['album_type'] for t in collaborations], ['ep'])
+
     def test_create_playlist_adds_every_track_to_a_private_playlist(self):
         tracks = [Track(f't{n}', f'Song {n}', 'Album', 'a', 'single', '2026-09-01', 'Nova', 'nova',
                         False, 'main', ['Nova'], f'song {n}|nova') for n in range(150)]
