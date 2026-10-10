@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 from PySide6.QtCore import QBuffer, QDate, QIODevice, QSettings, Qt, QThread, QUrl
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QAbstractButton, QApplication, QScrollArea
 
 import main
 from core.history import CheckHistory, CheckRecord, playlist_name, short_date
@@ -29,7 +29,7 @@ from core.spotify_service import SpotifyReleaseService
 from core.workers import AuthWorker, ScanWorker, ImageLoadWorker, LoadArtistsWorker
 from fake_spotify import FakeSpotifyWebAPI, album, artist_ref, track as api_track
 from ui.font_loader import load_bundled_fonts
-from ui.main_window import MainWindow
+from ui.main_window import MainWindow, PendingSave
 
 NOVA = artist_ref('nova', 'Nova')
 KITE = artist_ref('kite', 'Kite')
@@ -426,6 +426,190 @@ class DesktopFlowTests(unittest.TestCase):
             self.wait_until(lambda: threads and not self.window._workers)
             self.assertEqual(threads, [self.app.thread()])
             self.assertEqual(self.window.image_requests, {})
+
+    def test_every_visible_button_does_what_it_says(self):
+        home = self.sign_in()
+        window, settings = self.window, self.window.settings_page
+        user = dict(window.service.user_data)
+        playlist = 'https://open.spotify.com/playlist/p1'
+        earlier = CheckRecord(days_ago(9), days_ago(2), 'x', songs=3, playlist_name='wavvie', playlist_url=playlist)
+        song = Track('t1', 'Glow', 'Glow', 'a', 'single', days_ago(2), 'Nova', 'nova', False, 'main', ['Nova'],
+                     'glow|nova')
+        json_copy = str(Path(self.directory.name) / 'tracklist_1.json')
+        saved = []
+        self.patch(patch.object(window.thread_pool, 'start'))  # workers never run; each click's effect is checked directly
+        self.patch(patch('ui.main_window.save_environment', side_effect=lambda values: saved.append(values)))
+        self.patch(patch.object(window.service, 'cancel_authentication'))
+
+        def reset(page):
+            window.set_operation(None)
+            window.pending = None
+            window.service.user_data = dict(user)
+            window.service.cancelled = False
+            window.followed_count = 2
+            window.settings_page.set_account(user['display_name'])  # undo an earlier Disconnect click
+            window.history = CheckHistory([earlier])
+            if window.log_dialog is not None:
+                window.log_dialog.close()
+            window.show_page(page)
+
+        def at_home(show):
+            def enter():
+                reset(home)
+                show()
+            return enter
+
+        def dates():
+            window.show_home_ready()
+            home.btn_quiet.click()
+
+        def checking():
+            window.set_operation('scan')
+            home.show_checking(2, date.today())
+
+        def stopping():
+            checking()
+            window.stop_check()
+
+        def not_saved():
+            window.pending = PendingSave([song], ScanConfiguration(cutoff_date_str=days_ago(2)), 1, 2, 2, True)
+            home.show_not_saved(1, 'Spotify is busy right now.')
+
+        def failed():
+            home.show_checking(2, date.today())
+            home.show_failed('Spotify reported a problem: boom')
+
+        def settings_page():
+            reset(settings)
+            self.settings.clear()
+            settings.load_settings()
+            if not settings.advanced.isHidden():
+                settings.toggle_advanced()
+
+        def advanced_settings():
+            settings_page()
+            settings.toggle_advanced()
+
+        def activity_log():
+            advanced_settings()
+            window.open_activity_log()
+
+        def sign_in_idle():
+            reset(window.sign_in_page)
+            window.sign_in_page.show_idle()
+
+        def signing_in():
+            sign_in_idle()
+            window.start_authentication()
+
+        def setup():
+            reset(window.setup_page)
+            window.setup_page.txt_id.setText('abc123')
+            window.setup_page.txt_secret.setText('secret456')
+
+        def opened(url):
+            return lambda: self.assertEqual(self.opened[-1], url)
+
+        def state(name):
+            return lambda: self.assertEqual(home.state, name)
+
+        def page(expected):
+            return lambda: self.assertIs(window.stack.currentWidget(), expected)
+
+        def operation(name):
+            return lambda: self.assertEqual(window.operation, name)
+
+        settings_buttons = {'openSettings': page(settings), 'closeSettings': page(home),
+                            'disconnect': page(window.sign_in_page)}
+        scenarios = [
+            ('ready', at_home(window.show_home_ready), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': operation('scan'),
+                'quietAction': lambda: self.assertFalse(home.dates_row.isHidden()),
+                'openHistoryPlaylist': opened(playlist)}),
+            ('changing dates', at_home(dates), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': operation('scan'),
+                'useSuggestedDates': lambda: self.assertTrue(home.dates_row.isHidden()),
+                'openHistoryPlaylist': opened(playlist)}),
+            ('checking', at_home(checking), lambda: window, {
+                'openSettings': page(settings), 'quietAction': operation('cancelling')}),
+            ('stopping', at_home(stopping), lambda: window, {
+                'openSettings': page(settings), 'quietAction': operation('cancelling')}),
+            ('done', at_home(lambda: home.show_done('wavvie', playlist, [song], json_file=json_copy)), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': opened(playlist), 'quietAction': state('ready'),
+                'extraAction': opened(QUrl.fromLocalFile(os.path.dirname(os.path.abspath(json_copy))).toString())}),
+            ('nothing new', at_home(lambda: home.show_nothing_new(date.today())), lambda: window, {
+                'openSettings': page(settings), 'quietAction': state('ready')}),
+            ('not saved', at_home(not_saved), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': operation('playlist'),
+                'quietAction': lambda: (self.assertEqual(home.state, 'ready'), self.assertIsNone(window.pending))}),
+            ('stopped', at_home(home.show_stopped), lambda: window, {
+                'openSettings': page(settings), 'quietAction': state('ready')}),
+            ('failed', at_home(failed), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': operation('scan'), 'quietAction': state('ready')}),
+            ('no artists', at_home(home.show_no_artists), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': operation('artists')}),
+            ('artists failed', at_home(lambda: home.show_artists_failed('Spotify is busy right now.')), lambda: window, {
+                'openSettings': page(settings), 'primaryAction': operation('artists')}),
+            ('settings', settings_page, lambda: window, dict(settings_buttons, **{
+                'toggleAdvanced': lambda: self.assertFalse(settings.advanced.isHidden())})),
+            ('advanced settings', advanced_settings, lambda: window, dict(settings_buttons, **{
+                'toggleAdvanced': lambda: self.assertTrue(settings.advanced.isHidden()),
+                'artistRange': lambda: self.assertTrue(self.settings.value('artist_range_enabled', type=bool)),
+                'saveJson': lambda: self.assertTrue(self.settings.value('auto_export_json', type=bool)),
+                'reduceMotion': lambda: self.assertTrue(home.wave.reduced_motion),
+                'refreshArtists': lambda: (self.assertEqual(window.operation, 'artists'),
+                                           self.assertIs(window.stack.currentWidget(), home)),
+                'viewActivityLog': lambda: self.assertTrue(window.log_dialog.isVisible())})),
+            ('activity log', activity_log, lambda: window.log_dialog, {
+                'copyLog': lambda: self.assertEqual(QGuiApplication.clipboard().text(), window.activity_log.text()),
+                'closeLog': lambda: self.assertFalse(window.log_dialog.isVisible())}),
+            ('sign in', sign_in_idle, lambda: window, {'connectSpotify': operation('auth')}),
+            ('signing in', signing_in, lambda: window, {
+                'cancelSignIn': lambda: self.assertTrue(window.sign_in_cancelled)}),
+            ('setup', setup, lambda: window, {
+                'openDashboard': opened('https://developer.spotify.com/dashboard'),
+                'copyRedirect': lambda: self.assertEqual(QGuiApplication.clipboard().text(),
+                                                         window.setup_page.redirect_uri),
+                'saveCredentials': lambda: self.assertEqual(saved[-1]['SPOTIPY_CLIENT_ID'], 'abc123')}),
+        ]
+
+        def visible(root):
+            return [found for found in root.findChildren(QAbstractButton)
+                    if found.objectName() and found.isVisibleTo(root)]
+
+        for name, enter, root, expectations in scenarios:
+            enter()
+            self.assertEqual(sorted({found.objectName() for found in visible(root())}), sorted(expectations), name)
+            for button_name, verify in expectations.items():
+                enter()
+                targets = [found for found in visible(root()) if found.objectName() == button_name]
+                self.assertTrue(targets, f'{name}: {button_name} is not visible')
+                for target in targets:
+                    target.click()
+                    self.app.processEvents()
+                    with self.subTest(state=name, button=button_name):
+                        verify()
+
+    def test_every_page_fits_supported_window_sizes_without_sideways_scrolling(self):
+        long_title = 'An extremely long song title that keeps going and going ' * 4
+        guest = artist_ref('guest', 'A guest artist with a very long name indeed ' * 3)
+        self.api.artist_albums['nova'] = {'single': [album('long', long_title, 'single', days_ago(3), [NOVA])]}
+        self.api.album_tracks['long'] = [api_track('long1', long_title, [NOVA, guest])]
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        self.window.settings_page.toggle_advanced()
+        self.window.show()
+        for width, height in ((720, 560), (900, 680), (1600, 1000)):
+            self.window.resize(width, height)
+            for page in (self.window.setup_page, self.window.sign_in_page, home, self.window.settings_page):
+                self.window.show_page(page)
+                self.app.processEvents()
+                self.assertEqual((self.window.width(), self.window.height()), (width, height))
+                for area in page.findChildren(QScrollArea):
+                    where = f'{type(page).__name__} at {width}×{height}'
+                    self.assertEqual(area.horizontalScrollBar().maximum(), 0, where)
+                    self.assertLessEqual(area.widget().width(), area.viewport().width(), where)
 
 
 class WorkerAndServiceUXTests(unittest.TestCase):
