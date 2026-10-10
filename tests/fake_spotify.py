@@ -65,6 +65,8 @@ class FakeSpotifyWebAPI(BaseAdapter):
         self.page_limit = 10        # largest search / artist-album page Spotify serves
         self.large_pages = 'reject' # larger requests: 'reject' with 400, or 'clamp' silently
         self.refused = 0
+        self.followed = []          # artist objects returned by GET /me/following
+        self.failures = {}          # path -> HTTP status to answer instead
 
     def client(self):
         session = requests.Session()
@@ -97,6 +99,10 @@ class FakeSpotifyWebAPI(BaseAdapter):
 
     def route(self, method, path, query, body):
         parts = path.strip('/').split('/')
+        if path in self.failures:
+            return error(self.failures[path], 'Simulated failure')
+        if method == 'GET' and parts == ['me', 'following']:
+            return self.following(query)
         if method == 'GET' and parts == ['search']:
             return self.search(query)
         if method == 'GET' and len(parts) == 3 and parts[0] == 'artists' and parts[2] == 'albums':
@@ -130,6 +136,18 @@ class FakeSpotifyWebAPI(BaseAdapter):
             items = [item for item in items if first <= int(item['album']['release_date'][:4]) <= last]
         status, payload = self.limited_page(items, query)
         return status, ({'tracks': payload} if status == 200 else payload)
+
+    def following(self, query):
+        limit = int(query.get('limit', 20))
+        if not 1 <= limit <= 50:
+            return error(400, 'Invalid limit')
+        ids = [artist['id'] for artist in self.followed]
+        start = ids.index(query['after']) + 1 if query.get('after') in ids else 0
+        chunk = self.followed[start:start + limit]
+        more = start + limit < len(self.followed)
+        return 200, {'artists': {'items': chunk, 'limit': limit, 'total': len(self.followed),
+                                 'next': 'https://api.spotify.com/v1/me/following?type=artist' if more else None,
+                                 'cursors': {'after': chunk[-1]['id'] if chunk and more else None}}}
 
     def limited_page(self, items, query):
         if int(query.get('limit', 5)) > self.page_limit:

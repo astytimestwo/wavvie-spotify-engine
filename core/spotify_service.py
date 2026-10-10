@@ -566,7 +566,7 @@ class SpotifyReleaseService:
         return all_tracks
 
     def scan_releases(self, config: ScanConfiguration) -> Optional[ScanResult]:
-        self.cancelled = False
+        # Callers clear `cancelled` before starting, so a stop requested before the scan begins still counts.
         self.trigger_callback("scan_started")
         if config.start_index < 1 or config.end_index < config.start_index or not 1 <= config.worker_count <= 20:
             self.trigger_callback("fatal_error", "Choose a valid artist range and a scan speed between 1 and 20.")

@@ -2,30 +2,50 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import io
-import sys
+import importlib
 import json
+import logging
 import socket
+import sys
 import tempfile
 import threading
 import time
 import unittest
-import importlib
 import urllib.request
 from dataclasses import asdict, replace
+from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtCore import QSettings, Qt, QBuffer, QIODevice, QUrl, QThread
-from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QScrollArea
+from PySide6.QtCore import QBuffer, QDate, QIODevice, QSettings, Qt, QThread, QUrl
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
+import main
+from core.history import CheckHistory, CheckRecord, playlist_name, short_date
 from core.models import Track, ScanConfiguration, ScanResult, PlaylistResult
 from core.spotify_service import SpotifyReleaseService
 from core.workers import AuthWorker, ScanWorker, ImageLoadWorker, LoadArtistsWorker
-from ui.main_window import MainWindow
-from ui.pages.settings_page import SettingsPage
+from fake_spotify import FakeSpotifyWebAPI, album, artist_ref, track as api_track
 from ui.font_loader import load_bundled_fonts
+from ui.main_window import MainWindow
+
+NOVA = artist_ref('nova', 'Nova')
+KITE = artist_ref('kite', 'Kite')
+
+
+def days_ago(count):
+    return (date.today() - timedelta(days=count)).isoformat()
+
+
+def png_bytes():
+    image = QImage(4, 4, QImage.Format_RGB32)
+    image.fill(Qt.blue)
+    buffer = QBuffer()
+    buffer.open(QIODevice.WriteOnly)
+    image.save(buffer, 'PNG')
+    return bytes(buffer.data())
 
 
 def track(number=1, **changes):
@@ -67,7 +87,7 @@ class BrowserSignIn:
             pass
 
 
-class DesktopUXTests(unittest.TestCase):
+class DesktopFlowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -75,380 +95,337 @@ class DesktopUXTests(unittest.TestCase):
 
     def setUp(self):
         self.qt_errors = []
-        patcher = patch.object(sys, 'excepthook', lambda *args: self.qt_errors.append(args))
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        self.patch(patch.object(sys, 'excepthook', lambda *args: self.qt_errors.append(args)))
         self.addCleanup(lambda: self.assertEqual(self.qt_errors, [], 'Unhandled exception in a Qt slot'))
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
+        previous = os.getcwd()
+        os.chdir(self.directory.name)
+        self.addCleanup(os.chdir, previous)
         settings_path = str(Path(self.directory.name) / 'settings.ini')
+
         class IsolatedSettings(QSettings):
             def __init__(self, *args, **kwargs):
                 super().__init__(settings_path, QSettings.IniFormat)
+
         self.settings = IsolatedSettings()
-        for name in ('ui.main_window', 'ui.pages.settings_page', 'ui.pages.dashboard_page'):
-            patcher = patch.object(importlib.import_module(name), 'QSettings', IsolatedSettings)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        patcher = patch('ui.pages.auth_page.load_environment')
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        patcher = patch.dict(os.environ, SPOTIPY_CLIENT_ID='test-id', SPOTIPY_CLIENT_SECRET='test-secret')
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name in ('ui.main_window', 'ui.pages.settings_page'):
+            self.patch(patch.object(importlib.import_module(name), 'QSettings', IsolatedSettings))
+        self.patch(patch('ui.main_window.load_environment'))
+        self.patch(patch.dict(os.environ, SPOTIPY_CLIENT_ID='test-id', SPOTIPY_CLIENT_SECRET='test-secret'))
+        self.opened = []
+        self.patch(patch('ui.main_window.QDesktopServices.openUrl',
+                         side_effect=lambda url: self.opened.append(url.toString())))
+        artwork = png_bytes()
+        self.patch(patch('core.workers.urllib.request.urlopen', side_effect=lambda *args, **kwargs: io.BytesIO(artwork)))
+        self.api = FakeSpotifyWebAPI()
+        self.api.page_limit = 50
+        self.api.followed = [NOVA, KITE]
         with patch.object(MainWindow, 'recheck_config'):
             self.window = MainWindow()
-        self.window.service.user_data = {'id': 'test-user', 'display_name': 'Listener'}
-        self.window.service.sp = MagicMock()
-        self.window.on_artists_loaded([{'id': 'artist', 'name': 'Artist'}] * 5)
-        self.window.switch_page(1)
         self.addCleanup(self.close_window)
 
+    def patch(self, patcher):
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def close_window(self):
-        self.window.thread_pool.waitForDone(2000)
+        self.window.thread_pool.waitForDone(3000)
         self.app.processEvents()
         self.window.close()
         self.window.deleteLater()
         self.app.processEvents()
 
-    def test_selection_matches_visible_rows_and_actions(self):
-        page = self.window.results_page
-        page.create_playlist_requested.disconnect(self.window.create_playlist)
-        tracks = [track(1), track(2, artist_name='Another', all_artists=['Another'])]
-        page.set_results(tracks)
-        captured = []
-        page.create_playlist_requested.connect(captured.append)
-        page.txt_search.setText('Another')
-        self.assertEqual(page.selected_tracks(), [tracks[1]])
-        self.assertIn('1 of 2 shown', page.lbl_selected_count.text())
-        page.on_create_playlist_clicked()
-        self.assertEqual(captured, [[tracks[1]]])
-        page.toggle_all_selection(Qt.Unchecked.value)
-        self.assertFalse(page.btn_export.isEnabled())
-        self.assertTrue(page.item_widgets['1'].chk.isChecked())
-        page.clear_filters()
-        self.assertEqual(page.chk_select_all.checkState(), Qt.PartiallyChecked)
-        page.toggle_all_selection(Qt.Checked.value)
-        self.assertEqual(page.selected_tracks(), tracks)
+    def wait_until(self, condition, timeout=5):
+        deadline = time.monotonic() + timeout
+        while not condition() and time.monotonic() < deadline:
+            QTest.qWait(10)
+        self.assertTrue(condition(), 'Timed out waiting for the window')
 
-    def test_empty_no_matches_and_reset_details(self):
-        page = self.window.results_page
-        self.assertFalse(page.btn_create_pl.isEnabled())
-        page.set_results([track()])
-        page.track_list.setCurrentRow(0)
-        self.assertIsNotNone(page.detail_panel.current_track)
-        page.txt_search.setText('nothing matches')
-        self.assertIn('No releases match', page.empty_label.text())
-        self.assertFalse(page.btn_export.isEnabled())
-        page.set_results([])
-        self.assertIsNone(page.detail_panel.current_track)
-        self.assertFalse(page.detail_panel.btn_spotify.isEnabled())
-        self.assertIn('No releases found', page.empty_label.text())
+    def sign_in(self, user_id='listener'):
+        service = SpotifyReleaseService(client_id='test-id', client_secret='test-secret')
+        service.sp = self.api.client()
+        service.user_data = {'id': user_id, 'display_name': 'Listener', 'images': []}
+        service.sleep_between_requests = 0
+        self.window.service = service
+        self.window.on_auth_success(service.user_data)
+        self.wait_until(lambda: self.window.operation is None)
+        return self.window.home_page
 
-    def test_row_height_and_cached_artwork(self):
-        page = self.window.results_page
-        image = QImage(20, 20, QImage.Format_RGB32)
-        image.fill(Qt.green)
-        page.set_track_artwork('art', image)
-        page.set_results([track(album_artwork_url='art')])
-        self.assertGreaterEqual(page.track_list.item(0).sizeHint().height(), 72)
-        self.assertFalse(page.item_widgets['1'].lbl_art.pixmap().isNull())
-        page.track_list.setCurrentRow(0)
-        self.assertIn('Album <live>', page.detail_panel.meta_text.toPlainText())
-        self.assertNotIn('Signature', page.detail_panel.meta_text.toPlainText())
+    def release(self, artist, album_id, days, *titles):
+        on = album(album_id, album_id.title(), 'single', days_ago(days), [artist], total_tracks=len(titles))
+        self.api.artist_albums.setdefault(artist['id'], {}).setdefault('single', []).append(on)
+        self.api.album_tracks[album_id] = [api_track(f'{album_id}{number}', title, [artist])
+                                           for number, title in enumerate(titles, 1)]
 
-    def test_validation_gives_feedback_and_focus(self):
-        page = self.window.scan_page
-        emitted = []
-        page.start_scan_requested.connect(emitted.append)
-        page.spin_start.setValue(5)
-        page.spin_end.setValue(2)
-        page.on_start_clicked()
-        self.assertEqual(emitted, [])
-        self.assertIn('End artist', page.lbl_validation.text())
-        page.spin_end.setValue(5)
-        page.txt_playlist_name.setText('   ')
-        page.on_start_clicked()
-        self.assertIn('playlist name', page.lbl_validation.text())
-        page.set_total_artists(0)
-        self.assertFalse(page.btn_start.isEnabled())
+    def hold_album_requests(self):
+        gate = threading.Event()
+        route = self.api.route
 
-    def test_settings_load_does_not_overwrite_saved_values(self):
-        self.settings.setValue('default_playlist_name', 'My mix')
-        self.settings.setValue('auto_export_json', False)
-        self.settings.setValue('auto_create_playlist', False)
-        self.settings.setValue('default_workers', 3)
-        self.settings.setValue('reduced_motion', True)
-        page = SettingsPage()
-        self.addCleanup(page.deleteLater)
-        self.assertEqual(self.settings.value('default_playlist_name'), 'My mix')
-        self.assertFalse(self.settings.value('auto_export_json', type=bool))
-        self.assertFalse(page.chk_create_pl.isChecked())
-        page.spin_workers.setValue(4)
-        self.assertEqual(self.settings.value('default_workers', type=int), 4)
-        self.assertEqual(page.lbl_saved.text(), 'Preferences saved.')
+        def held(method, path, query, body):
+            if path.endswith('/albums'):
+                gate.wait(5)
+            return route(method, path, query, body)
 
-    def test_reduced_motion_and_hidden_visualizers_stop_timers(self):
-        self.window.show()
-        self.app.processEvents()
+        self.api.route = held
+        self.addCleanup(gate.set)
+        return gate
+
+    def stored_history(self, user_id='listener'):
+        return CheckHistory.from_json(self.settings.value(f'check_history/{user_id}', '', type=str))
+
+    def test_first_check_saves_a_dated_playlist_and_remembers_the_window(self):
+        self.release(NOVA, 'glow', 3, 'Glow')
+        home = self.sign_in()
+        self.assertEqual(home.headline.text(), "Let's find your new music")
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        today, start = date.today(), date.today() - timedelta(days=30)
+        created = self.api.playlists['playlist1']
+        self.assertEqual(created['body']['name'], playlist_name(start, today))
+        self.assertFalse(created['body']['public'])
+        self.assertEqual(created['items'], ['spotify:track:glow1'])
+        self.assertEqual(home.headline.text(), '1 new song saved')
+        self.assertEqual([(r.start, r.end, r.songs, r.complete) for r in self.stored_history().records],
+                         [(start.isoformat(), today.isoformat(), 1, True)])
+        home.btn_quiet.click()
+        self.assertEqual(home.headline.text(), "You're up to date")
+
+    def test_next_check_starts_where_the_last_ended_and_skips_saved_songs(self):
+        earlier = CheckHistory([CheckRecord(days_ago(9), days_ago(2), 'x', songs=1, track_ids=['glow1'])])
+        self.settings.setValue('check_history/listener', earlier.to_json())
+        self.release(NOVA, 'glow', 2, 'Glow', 'Glow (Night Mix)')
+        home = self.sign_in()
+        self.assertEqual(home.headline.text(), f'New music since {short_date(date.today() - timedelta(days=2))}')
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        self.assertEqual(self.api.playlists['playlist1']['items'], ['spotify:track:glow2'])
+
+    def test_a_check_with_nothing_new_is_remembered_without_a_playlist(self):
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'nothing_new')
+        self.assertEqual(self.api.playlists, {})
+        self.assertEqual([(r.songs, r.playlist_url, r.complete) for r in self.stored_history().records],
+                         [(0, None, True)])
+
+    def test_artists_that_fail_still_save_and_the_next_check_finishes_the_window(self):
+        self.api.failures['/artists/kite/albums'] = 404
+        self.release(NOVA, 'glow', 3, 'Glow')
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        self.assertIn("Some artists couldn't be checked", home.note.text())
+        self.assertFalse(self.stored_history().records[0].complete)
+        home.btn_quiet.click()
+        self.assertEqual(home.headline.text(), "Let's finish your last check")
+
+    def test_a_playlist_spotify_did_not_create_can_be_saved_again(self):
+        self.api.failures['/me/playlists'] = 500
+        self.release(NOVA, 'glow', 3, 'Glow')
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'not_saved')
+        self.assertEqual(self.stored_history().records, [])
+        del self.api.failures['/me/playlists']
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        self.assertEqual(self.api.playlists['playlist1']['items'], ['spotify:track:glow1'])
+        self.assertEqual(len(self.stored_history().records), 1)
+
+    def test_a_partly_saved_playlist_is_reported_and_finished_next_time(self):
+        self.release(NOVA, 'big', 3, *[f'Song {number}' for number in range(120)])
+        route = self.api.route
+        calls = []
+
+        def flaky(method, path, query, body):
+            if path.endswith('/items'):
+                calls.append(path)
+                if len(calls) == 2:
+                    return 500, {'error': {'status': 500, 'message': 'Server error'}}
+            return route(method, path, query, body)
+
+        self.api.route = flaky
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        self.assertEqual(home.headline.text(), '100 of 120 songs saved')
+        record = self.stored_history().records[0]
+        self.assertEqual((record.songs, record.complete, len(record.track_ids)), (100, False, 100))
+
+    def test_stopping_a_check_saves_nothing(self):
+        gate = self.hold_album_requests()
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.assertEqual(home.state, 'checking')
+        home.btn_quiet.click()
+        self.assertEqual(home.btn_quiet.text(), 'Stopping…')
+        gate.set()
+        self.wait_until(lambda: home.state == 'stopped')
+        self.assertEqual(self.api.playlists, {})
+        self.assertEqual(self.stored_history().records, [])
+        home.btn_quiet.click()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'nothing_new')
+
+    def test_changed_dates_apply_to_one_check(self):
+        home = self.sign_in()
+        home.btn_quiet.click()
+        chosen = date.today() - timedelta(days=5)
+        home.date_start.setDate(QDate(chosen.year, chosen.month, chosen.day))
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'nothing_new')
+        self.assertEqual(self.window.check_config.cutoff_date_str, chosen.isoformat())
+        self.assertEqual(self.stored_history().records[0].start, chosen.isoformat())
+        home.btn_quiet.click()
+        self.assertEqual(home.headline.text(), "You're up to date")
+
+    def test_a_json_copy_is_saved_when_asked_for_and_its_folder_opens(self):
+        self.settings.setValue('auto_export_json', True)
+        self.release(NOVA, 'glow', 3, 'Glow')
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        copies = list(Path(self.directory.name).glob('tracklist_*.json'))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(json.loads(copies[0].read_text(encoding='utf-8'))['metadata']['total_tracks'], 1)
+        home.btn_extra.click()
+        self.assertEqual(Path(QUrl(self.opened[-1]).toLocalFile()).resolve(), Path(self.directory.name).resolve())
+
+    def test_checking_some_artists_keeps_the_window_open(self):
+        for key, value in (('artist_range_enabled', True), ('artist_range_start', 2), ('artist_range_end', 2)):
+            self.settings.setValue(key, value)
+        self.release(NOVA, 'glow', 3, 'Glow')
+        home = self.sign_in()
+        home.btn_primary.click()
+        self.wait_until(lambda: home.state == 'done')
+        self.assertEqual((self.window.check_config.start_index, self.window.check_config.end_index), (2, 2))
+        self.assertIn('Only artists 2–2 were checked', home.note.text())
+        self.assertEqual(self.stored_history().records[0].artist_range, '2–2')
+        self.assertTrue(self.api.playlists['playlist1']['body']['name'].endswith('(Artists 2-2)'))
+
+    def test_settings_open_from_the_header_and_change_the_first_check(self):
+        home = self.sign_in()
+        self.window.btn_settings.click()
+        self.assertIs(self.window.stack.currentWidget(), self.window.settings_page)
+        self.window.settings_page.combo_look_back.setCurrentIndex(0)
+        self.window.settings_page.btn_done.click()
+        self.assertIs(self.window.stack.currentWidget(), home)
+        self.assertEqual(home.btn_primary.text(), 'Check the last 7 days')
+
+    def test_reduced_motion_keeps_the_wave_still(self):
         self.settings.setValue('reduced_motion', True)
         self.window.apply_preferences()
-        self.assertFalse(self.window.dashboard_page.visualizer.timer.isActive())
-        self.assertFalse(self.window.scan_page.visualizer.timer.isActive())
-        self.assertFalse(self.window.sidebar.tip_timer.isActive())
+        home = self.window.home_page
+        self.window.show_page(home)
+        self.window.show()
+        home.show_checking(5, date.today())
+        self.app.processEvents()
+        self.assertTrue(home.wave.isVisible())
+        self.assertFalse(home.wave.timer.isActive())
         self.settings.setValue('reduced_motion', False)
         self.window.apply_preferences()
-        self.assertTrue(self.window.dashboard_page.visualizer.timer.isActive())
-        self.window.switch_page(3)
-        self.app.processEvents()
-        self.assertFalse(self.window.dashboard_page.visualizer.timer.isActive())
+        self.assertTrue(home.wave.timer.isActive())
 
-    def test_only_one_operation_and_cancellation_waits(self):
-        window = self.window
-        with patch.object(window.thread_pool, 'start') as start:
-            config = ScanConfiguration(cutoff_date_str='2026-08-01')
-            window.start_release_scan(config)
-            window.start_release_scan(config)
-            self.assertEqual(start.call_count, 1)
-            window.cancel_release_scan()
-            self.assertEqual(window.operation, 'cancelling')
-            self.assertFalse(window.dashboard_page.btn_quick.isEnabled())
-            self.assertFalse(window.scan_page.btn_cancel.isEnabled())
-            window.start_release_scan(config)
-            self.assertEqual(start.call_count, 1)
-            window.on_scan_error('Scan cancelled by user.')
-            self.assertTrue(window.dashboard_page.btn_quick.isEnabled())
-            self.assertIsNone(window.scan_origin)
+    def test_only_one_operation_runs_at_a_time(self):
+        home = self.sign_in()
+        with patch.object(self.window.thread_pool, 'start') as start:
+            home.check_requested.emit(None)
+            home.check_requested.emit(None)
+            self.window.load_followed_artists()
+        self.assertEqual(start.call_count, 1)
+        self.window.set_operation(None)
 
-    def test_scan_worker_updates_real_window_and_automatic_actions(self):
-        window = self.window
-        window.service.get_and_cache_followed_artists = MagicMock(return_value=[{'id': 'artist', 'name': 'Artist'}])
-        window.service.get_new_tracks = MagicMock(return_value=[asdict(track())])
-        window.scan_origin = 'home'
-        with patch.object(window, 'export_json') as export, patch.object(window, 'create_playlist') as playlist:
-            window.start_release_scan(ScanConfiguration(cutoff_date_str='2026-08-01'))
-            deadline = time.monotonic() + 3
-            while window.operation and time.monotonic() < deadline:
-                QTest.qWait(10)
-            self.assertIsNone(window.operation)
-            self.assertEqual(window.page_stack.currentIndex(), 1)
-            self.assertEqual(window.scan_page.stacked_widget.currentIndex(), 0)
-            self.assertEqual(window.results_page.selected_tracks()[0].track_id, '1')
-            self.assertEqual(window.service.callbacks, {})
-            export.assert_called_once()
-            playlist.assert_called_once()
-            self.assertIsNone(window.scan_origin)
+    def test_each_account_keeps_its_own_history(self):
+        other = CheckHistory([CheckRecord(days_ago(9), days_ago(2), 'x', songs=4)])
+        self.settings.setValue('check_history/someone-else', other.to_json())
+        home = self.sign_in('listener')
+        self.assertEqual(home.headline.text(), "Let's find your new music")
 
-    def test_warnings_skip_auto_playlist_but_keep_results(self):
-        window = self.window
-        window.active_scan_config = ScanConfiguration(export_json=False)
-        window.scan_warnings = ['One artist failed']
-        with patch.object(window, 'create_playlist') as playlist:
-            window.on_scan_completed(ScanResult(tracks=[track()], total_artists=5, end_index=5))
-        playlist.assert_not_called()
-        self.assertIn('warnings', window.notice_text.text())
-        self.assertIn('playlist creation was skipped', window.notice_text.text())
-        self.assertEqual(window.results_page.selected_tracks(), [track()])
+    def test_disconnect_returns_to_sign_in_and_keeps_history(self):
+        stored = CheckHistory([CheckRecord(days_ago(9), days_ago(2), 'x', songs=4)]).to_json()
+        self.settings.setValue('check_history/listener', stored)
+        self.sign_in()
+        self.window.btn_settings.click()
+        self.window.settings_page.btn_disconnect.click()
+        self.assertIs(self.window.stack.currentWidget(), self.window.sign_in_page)
+        self.assertTrue(self.window.header.isHidden())
+        self.assertEqual(self.settings.value('check_history/listener', '', type=str), stored)
 
-    def test_warnings_without_automatic_playlist_do_not_report_it_skipped(self):
-        window = self.window
-        window.active_scan_config = ScanConfiguration(export_json=False, create_playlist_auto=False)
-        window.scan_warnings = ['One artist failed']
-        window.on_scan_completed(ScanResult(tracks=[track()], total_artists=5, end_index=5))
-        self.assertIn('warnings', window.notice_text.text())
-        self.assertNotIn('skipped', window.notice_text.text())
-
-    def test_playlist_metadata_and_range_belong_to_displayed_results(self):
-        window = self.window
-        config = ScanConfiguration(playlist_name='Custom mix', playlist_description='My description',
-                                   export_json=False, create_playlist_auto=False)
-        window.active_scan_config = config
-        window.on_scan_completed(ScanResult(tracks=[track()], start_index=2, end_index=4, total_artists=3, followed_artists=10))
-        window.active_scan_config = ScanConfiguration(playlist_name='Another scan')
-        with patch('ui.main_window.PlaylistWorker') as worker, patch.object(window.thread_pool, 'start'):
-            window.create_playlist([track()])
-        args = worker.call_args.args
-        self.assertEqual(args[2].playlist_name, 'Custom mix')
-        self.assertEqual(args[3:], (2, 4, 10))
-        window.on_playlist_created(PlaylistResult('Custom mix', 'p', 'https://open.spotify.com/playlist/p', 1))
-        self.assertTrue(window.results_page.btn_create_pl.isEnabled())
-        self.assertEqual(window.results_page.output_url, QUrl('https://open.spotify.com/playlist/p'))
-
-    def test_manual_export_can_cancel_or_choose_destination(self):
-        window = self.window
-        window.results_range = (1, 5)
-        with patch('ui.main_window.QFileDialog.getSaveFileName', return_value=('', '')):
-            with patch.object(window.service, 'dump_tracklist_to_json') as export:
-                window.export_json([track()], choose_path=True)
-                export.assert_not_called()
-        path = Path(self.directory.name) / 'chosen.json'
-        with patch('ui.main_window.QFileDialog.getSaveFileName', return_value=(str(path), 'JSON')):
-            window.export_json([track()], choose_path=True)
-        self.assertEqual(json.loads(path.read_text())['metadata']['total_tracks'], 1)
-        self.assertIn(str(path), window.results_page.output_label.text())
-
-    def test_layouts_fit_supported_window_sizes(self):
-        window = self.window
-        window.results_page.set_results([track(track_name='A very long track title ' * 20)])
-        window.show()
-        for width, height in ((1000, 640), (1280, 820), (1600, 1000)):
-            window.resize(width, height)
-            self.app.processEvents()
-            self.assertEqual(window.width(), width)
-            self.assertEqual(window.height(), height)
-            for index in range(6):
-                window.switch_page(index)
-                self.app.processEvents()
-                current = window.page_stack.currentWidget()
-                if isinstance(current, QScrollArea):
-                    self.assertEqual(current.horizontalScrollBar().maximum(), 0, f'page {index}, {width}')
-                self.assertLessEqual(current.width(), width)
-            window.switch_page(3)
-            self.app.processEvents()
-            self.assertEqual(window.results_page.detail_panel.isVisible(), window.results_page.width() >= 1000)
-
-    def test_activity_is_bounded_and_plain_text(self):
-        page = self.window.activity_page
-        for index in range(2100):
-            page.append_log_record(f'line {index} <tag>', 20)
-        page.refilter_logs()
-        self.assertEqual(len(page.all_log_records), 2000)
-        self.assertIn('<tag>', page.txt_log.toPlainText())
-        self.assertTrue(page.refresh_timer.isActive())
-
-    def test_missing_credentials_setup_fits_and_rechecks(self):
-        with patch.dict(os.environ, SPOTIPY_CLIENT_ID='', SPOTIPY_CLIENT_SECRET=''):
+    def test_setup_saves_credentials_then_offers_sign_in(self):
+        env_file = Path(self.directory.name) / '.env'
+        with patch.dict(os.environ), patch.object(main, '_loaded_environment', {}), \
+             patch('main.dotenv_search_paths', return_value=[str(env_file)]):
+            os.environ.pop('SPOTIPY_CLIENT_ID')
+            os.environ.pop('SPOTIPY_CLIENT_SECRET')
             self.window.recheck_config()
-            self.assertEqual(self.window.page_stack.currentIndex(), 0)
-            self.assertFalse(self.window.service.is_configured())
-            self.window.resize(1000, 640)
-            self.window.show()
-            self.app.processEvents()
-            self.assertEqual(self.window.page_stack.currentWidget().horizontalScrollBar().maximum(), 0)
-        with patch('ui.main_window.os.path.exists', return_value=False):
-            self.window.recheck_config()
-        self.assertTrue(self.window.service.is_configured())
-        self.assertIsNotNone(self.window.auth_page.btn_connect)
-
-    def test_outputs_remain_accessible_when_both_actions_finish(self):
-        page = self.window.results_page
-        page.show_output('Export saved', QUrl.fromLocalFile(self.directory.name), 'Open export folder')
-        page.show_output('Playlist created', QUrl('https://open.spotify.com/playlist/p'), 'Open playlist')
-        self.assertFalse(page.btn_export_folder.isHidden())
-        self.assertFalse(page.btn_open_output.isHidden())
-        self.assertIn('Export saved', page.output_label.text())
-        self.assertIn('Playlist created', page.output_label.text())
-
-    def test_image_completion_is_delivered_on_ui_thread(self):
-        image = QImage(10, 10, QImage.Format_RGB32)
-        image.fill(Qt.blue)
-        buffer = QBuffer()
-        buffer.open(QIODevice.WriteOnly)
-        image.save(buffer, 'PNG')
-        for index in range(5):
-            threads = []
-            with patch('core.workers.urllib.request.urlopen', return_value=io.BytesIO(bytes(buffer.data()))):
-                self.window.download_image(f'https://example.test/image-{index}', lambda img: threads.append(QThread.currentThread()), 20)
-                # The worker is released by its own queued slot, which can run after the image callback.
-                deadline = time.monotonic() + 3
-                while (not threads or self.window._workers) and time.monotonic() < deadline:
-                    QTest.qWait(10)
-            self.assertEqual(threads, [self.app.thread()])
-            self.assertEqual(self.window.image_requests, {})
-            self.assertEqual(self.window._workers, {})
-
-    def test_artwork_requests_are_limited_to_visible_rows(self):
-        page = self.window.results_page
-        page.artwork_requested.disconnect(self.window.load_result_artwork)
-        requested = []
-        page.artwork_requested.connect(requested.append)
-        page.set_results([track(i, album_artwork_url=f'art-{i}') for i in range(40)])
-        self.window.show()
-        self.window.switch_page(3)
-        self.app.processEvents()
-        self.assertGreater(len(set(requested)), 0)
-        self.assertLess(len(set(requested)), 20)
-        self.assertNotIn('art-39', requested)
-        page.track_list.scrollToItem(page.track_list.item(39))
-        self.app.processEvents()
-        self.assertIn('art-39', requested)
-
-    def test_closing_defers_destruction_until_workers_finish(self):
-        window = self.window
-        window.set_operation('scan')
-        event = MagicMock()
-        with patch.object(window.thread_pool, 'activeThreadCount', return_value=1):
-            window.closeEvent(event)
-        event.ignore.assert_called_once()
-        self.assertTrue(window.closing)
-        self.assertTrue(window.service.cancelled)
-        self.assertFalse(window.scan_page.btn_start.isEnabled())
-        with patch.object(window.thread_pool, 'activeThreadCount', return_value=0), patch.object(window, 'close') as close:
-            window.finish_close()
-        close.assert_called_once()
-
-    def test_large_results_and_long_names_remain_usable(self):
-        page = self.window.results_page
-        started = time.monotonic()
-        page.set_results([track(i) for i in range(1000)])
-        initial_elapsed = time.monotonic() - started
-        self.assertLess(initial_elapsed, 1, 'Initial results batch blocks the event loop')
-        self.assertTrue(page.loading)
-        self.assertFalse(page.btn_export.isEnabled())
-        while page.loading and time.monotonic() - started < 8:
-            QTest.qWait(10)
-        elapsed = time.monotonic() - started
-        self.assertEqual(page.track_list.count(), 1000)
-        page.txt_search.setText('Song 999')
-        self.assertEqual(len(page.selected_tracks()), 1)
-        self.assertLess(elapsed, 8, 'Populating 1000 results unexpectedly stalls the UI')
-        print(f'\n1000 result rows: initial batch {initial_elapsed:.2f}s; all rows {elapsed:.2f}s')
-
-    def test_new_results_replace_pending_batches(self):
-        page = self.window.results_page
-        page.set_results([track(i) for i in range(500)])
-        self.assertTrue(page.loading)
-        page.set_results([track(999)])
-        QTest.qWait(20)
-        self.assertFalse(page.loading)
-        self.assertEqual(page.selected_tracks(), [track(999)])
+            self.assertIs(self.window.stack.currentWidget(), self.window.setup_page)
+            self.assertTrue(self.window.header.isHidden())
+            self.window.setup_page.txt_id.setText('abc123')
+            self.window.setup_page.txt_secret.setText('secret456')
+            self.window.setup_page.btn_save.click()
+            self.assertIs(self.window.stack.currentWidget(), self.window.sign_in_page)
+        self.assertIn("SPOTIPY_CLIENT_ID='abc123'", env_file.read_text())
 
     def test_cancel_sign_in_releases_the_browser_wait(self):
         sign_in = BrowserSignIn(self, self.directory.name)
         self.window.service = sign_in.service()
+        self.window.show_page(self.window.sign_in_page)
         self.window.start_authentication()
         self.assertTrue(sign_in.wait_until_waiting())
-        self.assertFalse(self.window.auth_page.btn_cancel_auth.isHidden())
-
-        self.window.auth_page.btn_cancel_auth.click()
-        deadline = time.monotonic() + 5
-        while self.window.operation and time.monotonic() < deadline:
-            QTest.qWait(10)
-
-        self.assertIsNone(self.window.operation)
-        self.assertTrue(self.window.auth_page.btn_connect.isEnabled())
-        self.assertIn('Sign-in cancelled', self.window.notice_text.text())
+        page = self.window.sign_in_page
+        self.assertFalse(page.btn_cancel.isHidden())
+        page.btn_cancel.click()
+        self.wait_until(lambda: self.window.operation is None)
+        self.assertFalse(page.btn_connect.isHidden())
+        self.assertTrue(page.message.isHidden())
 
     def test_closing_during_sign_in_releases_the_browser_wait(self):
         sign_in = BrowserSignIn(self, self.directory.name)
         self.window.service = sign_in.service()
+        self.window.show_page(self.window.sign_in_page)
         self.window.show()
         self.window.start_authentication()
         self.assertTrue(sign_in.wait_until_waiting())
-
         self.window.close()
-        deadline = time.monotonic() + 5
-        while self.window.isVisible() and time.monotonic() < deadline:
-            QTest.qWait(10)
-
-        self.assertFalse(self.window.isVisible())
+        self.wait_until(lambda: not self.window.isVisible())
         self.assertEqual(self.window.thread_pool.activeThreadCount(), 0)
 
-    def test_keyboard_search_and_form_accessibility(self):
-        self.window.on_shortcut_focus_search()
-        self.assertEqual(self.window.page_stack.currentIndex(), 3)
-        self.assertTrue(self.window.scan_page.spin_start.accessibleName())
-        self.assertTrue(self.window.settings_page.spin_workers.accessibleName())
+    def test_closing_during_a_check_waits_for_it_to_stop(self):
+        gate = self.hold_album_requests()
+        home = self.sign_in()
+        self.window.show()
+        home.btn_primary.click()
+        self.window.close()
+        self.assertTrue(self.window.isVisible())
+        gate.set()
+        self.wait_until(lambda: not self.window.isVisible())
+        self.assertEqual(self.stored_history().records, [])
+
+    def test_activity_log_opens_from_settings_and_copies(self):
+        logging.getLogger('core.spotify_service').warning('Loaded 2 artists from cache')
+        self.sign_in()
+        self.window.btn_settings.click()
+        settings = self.window.settings_page
+        settings.btn_advanced.click()
+        settings.btn_log.click()
+        dialog = self.window.log_dialog
+        self.assertTrue(dialog.isVisible())
+        self.assertIn('Loaded 2 artists from cache', dialog.view.toPlainText())
+        dialog.btn_copy.click()
+        self.assertIn('Loaded 2 artists from cache', QGuiApplication.clipboard().text())
+        dialog.btn_close.click()
+        self.assertFalse(dialog.isVisible())
+
+    def test_image_completion_is_delivered_on_the_ui_thread(self):
+        for index in range(5):
+            threads = []
+            self.window.download_image(f'https://example.test/image-{index}',
+                                       lambda image: threads.append(QThread.currentThread()), 20)
+            # The worker is released by its own queued slot, which can run after the image callback.
+            self.wait_until(lambda: threads and not self.window._workers)
+            self.assertEqual(threads, [self.app.thread()])
+            self.assertEqual(self.window.image_requests, {})
 
 
 class WorkerAndServiceUXTests(unittest.TestCase):

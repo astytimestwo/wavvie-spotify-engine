@@ -1,201 +1,196 @@
-from PySide6.QtCore import Qt, Signal, QSettings, QSignalBlocker
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                               QPushButton, QFrame, QGridLayout, QSpinBox, 
-                               QCheckBox, QLineEdit, QComboBox)
-from ui.theme import Theme
+"""Settings: your account, how far the first check looks back, and advanced options."""
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
+from PySide6.QtCore import QSettings, QSignalBlocker, Qt, Signal
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QSpinBox, QVBoxLayout, QWidget
+
+from ui.widgets.controls import button, label, rule, scroll_column
+
+LOOK_BACK_DAYS = (7, 30, 90, 180)
+
+
+@dataclass
+class Preferences:
+    look_back_days: int = 30
+    artist_range: Optional[Tuple[int, int]] = None
+    workers: int = 5
+    export_json: bool = False
+    reduced_motion: bool = False
+
+
+def read_preferences():
+    settings = QSettings("wavvie", "SpotifyPlaylistCreator")
+    days = settings.value("default_cutoff_days", 30, type=int)
+    first = max(1, settings.value("artist_range_start", 1, type=int))
+    last = max(first, settings.value("artist_range_end", first, type=int))
+    return Preferences(
+        look_back_days=days if days in LOOK_BACK_DAYS else 30,
+        artist_range=(first, last) if settings.value("artist_range_enabled", False, type=bool) else None,
+        workers=min(20, max(1, settings.value("default_workers", 5, type=int))),
+        export_json=settings.value("auto_export_json", False, type=bool),
+        reduced_motion=settings.value("reduced_motion", False, type=bool),
+    )
+
 
 class SettingsPage(QWidget):
+    done_requested = Signal()
     disconnect_requested = Signal()
-    clear_cache_requested = Signal()
+    refresh_artists_requested = Signal()
+    activity_log_requested = Signal()
     settings_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
-        
-        # Title
-        title = QLabel("Settings")
-        title.setProperty("class", "heading")
-        title.setStyleSheet("font-size: 24px;")
-        layout.addWidget(title)
-        
-        # 1. Spotify Connection Card
-        conn_card = QFrame()
-        conn_card.setProperty("class", "card")
-        conn_layout = QVBoxLayout(conn_card)
-        conn_layout.setContentsMargins(20, 20, 20, 20)
-        conn_layout.setSpacing(12)
-        
-        conn_title = QLabel("Spotify Connection")
-        conn_title.setStyleSheet(f"color: {Theme.STRONG_TEXT}; font-weight: bold; font-size: 15px;")
-        conn_layout.addWidget(conn_title)
-        
-        self.lbl_status = QLabel("Connection status: Unknown")
-        self.lbl_status.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 13px;")
-        conn_layout.addWidget(self.lbl_status)
-        
-        self.lbl_redirect = QLabel("Redirect URI: http://127.0.0.1:8888/callback")
-        self.lbl_redirect.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 11px;")
-        conn_layout.addWidget(self.lbl_redirect)
-        
-        self.btn_disconnect = QPushButton("Disconnect Spotify Account")
-        self.btn_disconnect.setProperty("class", "danger")
-        self.btn_disconnect.setCursor(Qt.PointingHandCursor)
-        self.btn_disconnect.clicked.connect(self.disconnect_requested.emit)
-        conn_layout.addWidget(self.btn_disconnect)
-        
-        layout.addWidget(conn_card)
-        
-        # 2. Preferences Card
-        pref_card = QFrame()
-        pref_card.setProperty("class", "card")
-        pref_layout = QGridLayout(pref_card)
-        pref_layout.setContentsMargins(20, 20, 20, 20)
-        pref_layout.setSpacing(16)
-        
-        pref_title = QLabel("Default Preferences")
-        pref_title.setStyleSheet(f"color: {Theme.STRONG_TEXT}; font-weight: bold; font-size: 15px;")
-        pref_layout.addWidget(pref_title, 0, 0, 1, 2)
-        
-        # Cutoff Days
-        pref_layout.addWidget(QLabel("Default Cutoff Period:"), 1, 0)
-        self.combo_cutoff = QComboBox()
-        self.combo_cutoff.addItems(["Last 7 Days", "Last 30 Days", "Last 90 Days", "Last 180 Days"])
-        self.combo_cutoff.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {Theme.SECONDARY_SURFACE};
-                border: 1px solid {Theme.BORDER};
-                border-radius: 12px;
-                padding: 8px 12px;
-                color: {Theme.STRONG_TEXT};
-            }}
-        """)
-        self.combo_cutoff.currentIndexChanged.connect(self.save_settings)
-        pref_layout.addWidget(self.combo_cutoff, 1, 1)
-        
-        # Worker count
-        pref_layout.addWidget(QLabel("Default Worker Count:"), 2, 0)
+        self.scroll, layout = scroll_column(self, top=20)
+        top = QHBoxLayout()
+        top.addWidget(label("Settings", "headline"), 1)
+        self.btn_done = button("Done", "primary", "closeSettings")
+        top.addWidget(self.btn_done, 0, Qt.AlignVCenter)
+        layout.addLayout(top)
+
+        layout.addWidget(label("Spotify account", "section"))
+        account = QHBoxLayout()
+        self.lbl_account = label("Not connected", "body")
+        self.btn_disconnect = button("Disconnect", "danger", "disconnect")
+        account.addWidget(self.lbl_account, 1)
+        account.addWidget(self.btn_disconnect)
+        layout.addLayout(account)
+        layout.addWidget(rule())
+
+        layout.addWidget(label("First check", "section"))
+        look_back = QHBoxLayout()
+        caption = label("When there are no earlier checks, look back")
+        self.combo_look_back = QComboBox()
+        self.combo_look_back.setObjectName("lookBack")
+        self.combo_look_back.addItems([f"{days} days" for days in LOOK_BACK_DAYS])
+        caption.setBuddy(self.combo_look_back)
+        look_back.addWidget(caption, 1)
+        look_back.addWidget(self.combo_look_back)
+        layout.addLayout(look_back)
+        layout.addWidget(rule())
+
+        self.btn_advanced = button("Show advanced settings", "quiet", "toggleAdvanced")
+        layout.addWidget(self.btn_advanced, 0, Qt.AlignLeft)
+        self.advanced = QWidget()
+        advanced = QVBoxLayout(self.advanced)
+        advanced.setContentsMargins(0, 0, 0, 0)
+        advanced.setSpacing(10)
+        self.chk_range = QCheckBox("Only check some artists")
+        self.chk_range.setObjectName("artistRange")
+        advanced.addWidget(self.chk_range)
+        range_row = QHBoxLayout()
+        self.spin_from = QSpinBox()
+        self.spin_to = QSpinBox()
+        for spin, text, name in ((self.spin_from, "From", "First artist to check"),
+                                 (self.spin_to, "to", "Last artist to check")):
+            spin.setRange(1, 9999)
+            spin.setAccessibleName(name)
+            caption = label(text, wrap=False)
+            caption.setBuddy(spin)
+            range_row.addWidget(caption)
+            range_row.addWidget(spin)
+        range_row.addStretch()
+        advanced.addLayout(range_row)
+        advanced.addWidget(label("Artists are in alphabetical order. Both ends are included.", "secondary"))
+        workers = QHBoxLayout()
+        caption = label("Parallel checks", wrap=False)
         self.spin_workers = QSpinBox()
-        self.spin_workers.setMinimum(1)
-        self.spin_workers.setMaximum(20)
-        self.spin_workers.valueChanged.connect(self.save_settings)
-        pref_layout.addWidget(self.spin_workers, 2, 1)
-        
-        # Default Playlist Name
-        pref_layout.addWidget(QLabel("Default Playlist Name:"), 3, 0)
-        self.txt_playlist_name = QLineEdit()
-        self.txt_playlist_name.editingFinished.connect(self.save_settings)
-        pref_layout.addWidget(self.txt_playlist_name, 3, 1)
-        
-        # Default Playlist Desc
-        pref_layout.addWidget(QLabel("Default Playlist Desc:"), 4, 0)
-        self.txt_playlist_desc = QLineEdit()
-        self.txt_playlist_desc.editingFinished.connect(self.save_settings)
-        pref_layout.addWidget(self.txt_playlist_desc, 4, 1)
-        
-        # Checkboxes
-        toggles = QVBoxLayout()
-        self.chk_export = QCheckBox("Export JSON After Scan")
-        self.chk_export.stateChanged.connect(self.save_settings)
-        toggles.addWidget(self.chk_export)
-        
-        self.chk_create_pl = QCheckBox("Create Spotify Playlist After Scan")
-        self.chk_create_pl.stateChanged.connect(self.save_settings)
-        toggles.addWidget(self.chk_create_pl)
-        
-        self.chk_reduced_motion = QCheckBox("Reduce animation and motion")
-        self.chk_reduced_motion.stateChanged.connect(self.save_settings)
-        toggles.addWidget(self.chk_reduced_motion)
-        
-        pref_layout.addLayout(toggles, 5, 0, 1, 2)
-        
-        layout.addWidget(pref_card)
-        
-        # 3. Cache Management Card
-        cache_card = QFrame()
-        cache_card.setProperty("class", "card")
-        cache_layout = QVBoxLayout(cache_card)
-        cache_layout.setContentsMargins(20, 20, 20, 20)
-        cache_layout.setSpacing(12)
-        
-        cache_title = QLabel("Cache & Storage")
-        cache_title.setStyleSheet(f"color: {Theme.STRONG_TEXT}; font-weight: bold; font-size: 15px;")
-        cache_layout.addWidget(cache_title)
-        
-        self.lbl_cache_path = QLabel("Cache File: followed_artists_cache.json")
-        self.lbl_cache_path.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 13px;")
-        cache_layout.addWidget(self.lbl_cache_path)
-        
-        self.btn_clear_cache = QPushButton("Refresh artist list")
-        self.btn_clear_cache.setCursor(Qt.PointingHandCursor)
-        self.btn_clear_cache.clicked.connect(self.clear_cache_requested.emit)
-        cache_layout.addWidget(self.btn_clear_cache)
-        
-        layout.addWidget(cache_card)
-        self.lbl_saved = QLabel("Changes are saved automatically.")
-        self.lbl_saved.setWordWrap(True)
+        self.spin_workers.setRange(1, 20)
+        caption.setBuddy(self.spin_workers)
+        workers.addWidget(caption)
+        workers.addWidget(self.spin_workers)
+        workers.addStretch()
+        advanced.addLayout(workers)
+        advanced.addWidget(label("Lower this if Spotify often asks wavvie to slow down.", "secondary"))
+        self.chk_json = QCheckBox("Also save a JSON file of each check")
+        self.chk_json.setObjectName("saveJson")
+        self.chk_motion = QCheckBox("Reduce motion")
+        self.chk_motion.setObjectName("reduceMotion")
+        advanced.addWidget(self.chk_json)
+        advanced.addWidget(self.chk_motion)
+        tools = QHBoxLayout()
+        self.btn_refresh = button("Refresh artist list", "quiet", "refreshArtists")
+        self.btn_log = button("View activity log", "quiet", "viewActivityLog")
+        tools.addWidget(self.btn_refresh)
+        tools.addWidget(self.btn_log)
+        tools.addStretch()
+        advanced.addLayout(tools)
+        self.advanced.hide()
+        layout.addWidget(self.advanced)
+        self.lbl_saved = label("Changes are saved automatically.", "secondary")
         layout.addWidget(self.lbl_saved)
         layout.addStretch()
-        
-        # Load settings initially
+
+        self.btn_done.clicked.connect(self.done_requested.emit)
+        self.btn_disconnect.clicked.connect(self.disconnect_requested.emit)
+        self.btn_advanced.clicked.connect(self.toggle_advanced)
+        self.btn_refresh.clicked.connect(self.refresh_artists_requested.emit)
+        self.btn_log.clicked.connect(self.activity_log_requested.emit)
+        self.combo_look_back.currentIndexChanged.connect(self.save_settings)
+        for box in (self.chk_range, self.chk_json, self.chk_motion):
+            box.toggled.connect(self.save_settings)
+        for spin in (self.spin_from, self.spin_to, self.spin_workers):
+            spin.valueChanged.connect(self.save_settings)
         self.load_settings()
 
+    def controls(self):
+        return (self.combo_look_back, self.chk_range, self.spin_from, self.spin_to, self.spin_workers,
+                self.chk_json, self.chk_motion)
+
     def load_settings(self):
-        # Loading one control must not save the still-uninitialized others.
-        blockers = [QSignalBlocker(control) for control in (
-            self.spin_workers, self.txt_playlist_name, self.txt_playlist_desc,
-            self.chk_export, self.chk_create_pl, self.chk_reduced_motion, self.combo_cutoff)]
+        # Loading one control must not save the others before they are set.
+        blockers = [QSignalBlocker(control) for control in self.controls()]
         settings = QSettings("wavvie", "SpotifyPlaylistCreator")
-        
-        workers = settings.value("default_workers", 5, type=int)
-        playlist_name = settings.value("default_playlist_name", "New Releases", type=str)
-        playlist_desc = settings.value("default_playlist_desc", "New tracks from followed artists", type=str)
-        auto_export = settings.value("auto_export_json", True, type=bool)
-        auto_create = settings.value("auto_create_playlist", True, type=bool)
-        reduced_motion = settings.value("reduced_motion", False, type=bool)
-        cutoff_idx = settings.value("default_cutoff_idx", 1, type=int) # default to index 1 (30 days)
-        
-        self.spin_workers.setValue(workers)
-        self.txt_playlist_name.setText(playlist_name)
-        self.txt_playlist_desc.setText(playlist_desc)
-        self.chk_export.setChecked(auto_export)
-        self.chk_create_pl.setChecked(auto_create)
-        self.chk_reduced_motion.setChecked(reduced_motion)
-        self.combo_cutoff.setCurrentIndex(cutoff_idx)
+        preferences = read_preferences()
+        self.combo_look_back.setCurrentIndex(LOOK_BACK_DAYS.index(preferences.look_back_days))
+        self.chk_range.setChecked(preferences.artist_range is not None)
+        self.spin_from.setValue(settings.value("artist_range_start", 1, type=int))
+        self.spin_to.setValue(settings.value("artist_range_end", 1, type=int))
+        self.spin_workers.setValue(preferences.workers)
+        self.chk_json.setChecked(preferences.export_json)
+        self.chk_motion.setChecked(preferences.reduced_motion)
+        del blockers
+        self.sync_range_controls()
 
     def save_settings(self):
-        if not self.txt_playlist_name.text().strip():
-            self.lbl_saved.setText("Enter a default playlist name to save your preferences.")
-            return
+        if self.spin_to.value() < self.spin_from.value():
+            blocker = QSignalBlocker(self.spin_to)
+            self.spin_to.setValue(self.spin_from.value())
+            del blocker
         settings = QSettings("wavvie", "SpotifyPlaylistCreator")
-        
+        settings.setValue("default_cutoff_days", LOOK_BACK_DAYS[self.combo_look_back.currentIndex()])
+        settings.setValue("artist_range_enabled", self.chk_range.isChecked())
+        settings.setValue("artist_range_start", self.spin_from.value())
+        settings.setValue("artist_range_end", self.spin_to.value())
         settings.setValue("default_workers", self.spin_workers.value())
-        settings.setValue("default_playlist_name", self.txt_playlist_name.text().strip())
-        settings.setValue("default_playlist_desc", self.txt_playlist_desc.text())
-        settings.setValue("auto_export_json", self.chk_export.isChecked())
-        settings.setValue("auto_create_playlist", self.chk_create_pl.isChecked())
-        settings.setValue("reduced_motion", self.chk_reduced_motion.isChecked())
-        settings.setValue("default_cutoff_idx", self.combo_cutoff.currentIndex())
-        
-        # Map indices to days
-        cutoff_days_map = {0: 7, 1: 30, 2: 90, 3: 180}
-        days = cutoff_days_map.get(self.combo_cutoff.currentIndex(), 30)
-        settings.setValue("default_cutoff_days", days)
-        
+        settings.setValue("auto_export_json", self.chk_json.isChecked())
+        settings.setValue("reduced_motion", self.chk_motion.isChecked())
         settings.sync()
-        self.lbl_saved.setText("Preferences saved." if settings.status() == QSettings.NoError
-                               else "Preferences could not be saved. Check local storage permissions.")
+        self.lbl_saved.setText("Changes are saved automatically." if settings.status() == QSettings.NoError
+                               else "Your changes couldn't be saved. Check that wavvie can write its settings.")
+        self.sync_range_controls()
         self.settings_changed.emit()
 
-    def update_connection_status(self, user_name: str, redirect_uri: str):
-        if user_name:
-            self.lbl_status.setText(f"Connection status: Connected as {user_name}")
-            self.btn_disconnect.setEnabled(True)
-        else:
-            self.lbl_status.setText("Connection status: Not Connected")
-            self.btn_disconnect.setEnabled(False)
-            
-        self.lbl_redirect.setText(f"Redirect URI: {redirect_uri}")
+    def sync_range_controls(self):
+        for spin in (self.spin_from, self.spin_to):
+            spin.setEnabled(self.chk_range.isChecked())
+
+    def toggle_advanced(self):
+        show = self.advanced.isHidden()
+        self.advanced.setVisible(show)
+        self.btn_advanced.setText("Hide advanced settings" if show else "Show advanced settings")
+
+    def set_account(self, name):
+        self.lbl_account.setText(f"Connected as {name}" if name else "Not connected")
+        self.btn_disconnect.setVisible(bool(name))
+
+    def set_artist_count(self, count):
+        for spin in (self.spin_from, self.spin_to):
+            blocker = QSignalBlocker(spin)
+            spin.setMaximum(max(1, count))
+            del blocker
+
+    def set_busy(self, busy):
+        self.btn_disconnect.setEnabled(not busy)
+        self.btn_refresh.setEnabled(not busy)

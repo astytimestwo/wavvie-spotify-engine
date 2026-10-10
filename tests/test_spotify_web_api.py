@@ -232,6 +232,15 @@ class SpotifyWebApiTests(unittest.TestCase):
         self.assertFalse(created['body']['public'])
         self.assertEqual(created['items'], [f'spotify:track:t{n}' for n in range(150)])
 
+    def test_a_stop_requested_before_the_scan_starts_is_honoured(self):
+        self.service.get_and_cache_followed_artists = lambda refresh=False: [NOVA]
+        self.service.cancel_scan()
+
+        result = self.service.scan_releases(ScanConfiguration(cutoff_date_str='2026-09-01', worker_count=1))
+
+        self.assertIsNone(result)
+        self.assertEqual(self.api.requested('GET', '/artists/nova/albums'), [])
+
     def test_playlist_description_mentions_the_range_only_for_partial_scans(self):
         song = Track('t1', 'Song', 'Album', 'a', 'single', '2026-09-01', 'Nova', 'nova',
                      False, 'main', ['Nova'], 'song|nova')
