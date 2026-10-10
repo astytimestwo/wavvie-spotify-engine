@@ -2,6 +2,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
+from ui.widgets.tide import Tide
+
 
 def label(text="", role=None, wrap=True, selectable=False):
     widget = QLabel(text)
@@ -52,8 +54,12 @@ def centre(container, column, top=0, bottom=0):
     row.addStretch(1)
 
 
-def scroll_column(owner, top=32, bottom=32):
-    """Give owner a vertical scroll area holding one centred column up to 600 px wide."""
+def scroll_column(owner, top=32, bottom=32, centred=False):
+    """Give owner a vertical scroll area holding one centred column up to 600 px wide, above a low tide.
+
+    With centred, content shorter than the window sits a little above the middle; longer content
+    scrolls from the top.
+    """
     outer = QVBoxLayout(owner)
     outer.setContentsMargins(0, 0, 0, 0)
     scroll = QScrollArea()
@@ -63,11 +69,19 @@ def scroll_column(owner, top=32, bottom=32):
     # A click still lets the keys scroll, but Tab skips the area: it has no focus ring to show.
     scroll.setFocusPolicy(Qt.ClickFocus)
     outer.addWidget(scroll)
-    content = QWidget()
+    content = Tide()
     scroll.setWidget(content)
     column = QWidget()
-    centre(content, column, top, bottom)
+    centre(content, column, top, bottom + Tide.HEIGHT)
     layout = QVBoxLayout(column)
     layout.setContentsMargins(0, 0, 0, 0)
+    if centred:
+        # Spare height splits 2:3 above and below, so the block rests just above the middle.
+        layout.setSpacing(0)
+        layout.addStretch(2)
+        block = QVBoxLayout()
+        layout.addLayout(block)
+        layout.addStretch(3)
+        layout = block
     layout.setSpacing(12)
     return scroll, layout

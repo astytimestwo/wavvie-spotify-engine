@@ -15,7 +15,7 @@ class SetupPage(QWidget):
     def __init__(self, redirect_uri, parent=None):
         super().__init__(parent)
         self.redirect_uri = redirect_uri
-        self.scroll, layout = scroll_column(self, top=56)
+        self.scroll, layout = scroll_column(self, top=40, centred=True)
         layout.addWidget(label("Connect wavvie to Spotify", "headline"))
         layout.addWidget(label("wavvie needs its own Spotify app. Setting it up takes a couple of minutes.", "body"))
         layout.addSpacing(8)
@@ -63,7 +63,6 @@ class SetupPage(QWidget):
         self.err_save.hide()
         layout.addWidget(self.err_save)
         layout.addWidget(label("These stay on this computer, in a .env file next to wavvie.", "secondary"))
-        layout.addStretch()
 
         self.btn_dashboard.clicked.connect(lambda: self.open_url_requested.emit(DASHBOARD_URL))
         self.btn_copy.clicked.connect(self.copy_redirect_uri)

@@ -2,6 +2,7 @@ class Theme:
     # wavvie palette ("low tide")
     DEEP = "#0F2326"
     SURFACE = "#163338"
+    SHALLOW = "#193A40"  # between SURFACE and RAISED: the tide's middle wave
     RAISED = "#1D4047"
     LINE = "#2A5259"
     FOAM = "#EEF5F1"

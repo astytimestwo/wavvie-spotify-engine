@@ -115,7 +115,7 @@ The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary I
 
 Service tests run the real spotipy client against `tests/fake_spotify.py`, an in-memory transport for the Development Mode playlist routes that can refuse, silently cap or accept 50-item pages. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
 
-Validation on 2026-10-10: **119 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. Every window state was also rendered at 900×680 and 720×560 and reviewed by eye, and keyboard focus was checked by tabbing through Home and Settings on the native Windows platform.
+Validation on 2026-10-10: **126 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. Every window state was also rendered at 900×680 and 720×560 and reviewed by eye, and keyboard focus was checked by tabbing through Home and Settings on the native Windows platform.
 
 Live check on 2026-10-10 with a Development Mode app and the CLI: sign-in, 325 followed artists, a five-artist scan (5 tracks in 22 seconds, 50-item pages accepted), JSON export and one private playlist (5 tracks) all worked. The desktop window and the packaged executable were not run against Spotify; they share the same service code.
 

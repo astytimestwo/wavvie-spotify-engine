@@ -59,8 +59,12 @@ class SongRow(QFrame):
 
     def set_artwork(self, image):
         if not image.isNull():
-            self.art.setPixmap(QPixmap.fromImage(image.scaled(40, 40, Qt.KeepAspectRatioByExpanding,
-                                                              Qt.SmoothTransformation)))
+            # 40 px on screen is 80 real pixels on a 200% display; keep them all.
+            ratio = self.art.devicePixelRatioF()
+            side = round(40 * ratio)
+            pixmap = QPixmap.fromImage(image.scaled(side, side, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
+            pixmap.setDevicePixelRatio(ratio)
+            self.art.setPixmap(pixmap)
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -89,11 +93,13 @@ class HomePage(QWidget):
         self.state = 'empty'
         self.suggested: Optional[NextWindow] = None
         self.look_back_days = 30
+        self.artist_count = 0
+        self.first_run = False
         self.last_start: Optional[date] = None
         self.song_rows: List[SongRow] = []
         self.requested_artwork = set()
         self.actions = {}
-        self.scroll, layout = scroll_column(self, top=20)
+        self.scroll, layout = scroll_column(self, top=20, centred=True)
 
         self.headline = label("", "headline")
         self.body = label("", "body")
@@ -147,7 +153,6 @@ class HomePage(QWidget):
         self.history_layout.setContentsMargins(0, 20, 0, 0)
         self.history_layout.setSpacing(4)
         layout.addWidget(self.history_box)
-        layout.addStretch()
 
         self.date_start.dateChanged.connect(self.update_check_label)
         self.btn_reset_dates.clicked.connect(self.use_suggested_dates)
@@ -203,11 +208,12 @@ class HomePage(QWidget):
     def show_ready(self, window, artist_count, look_back_days, history):
         self.suggested = window
         self.look_back_days = look_back_days
+        self.artist_count = artist_count
         last = history[0] if history else None
-        if window.kind == 'first' or last is None:
+        self.first_run = window.kind == 'first' or last is None
+        if self.first_run:
             headline = "Let's find your new music"
-            body = (f"wavvie will check the {plural(artist_count, 'artist')} you follow and save anything "
-                    f"released in the last {look_back_days} days to a private playlist.")
+            body = self.first_run_body(window.start)
         elif window.kind == 'finish':
             headline = "Let's finish your last check"
             body = (f"Your last check didn't cover everything, so wavvie will look at "
@@ -254,9 +260,17 @@ class HomePage(QWidget):
                 return "Check again"
         return f"Check {short_date(start)} – today"
 
+    def first_run_body(self, start):
+        when = (f"in the last {self.look_back_days} days" if start == self.suggested.start
+                else f"since {short_date(start)}")
+        return (f"wavvie will check the {plural(self.artist_count, 'artist')} you follow and save anything "
+                f"released {when} to a private playlist.")
+
     def update_check_label(self):
         if self.state == 'ready':
             self.btn_primary.setText(self.check_label())
+            if self.first_run:
+                self.body.setText(self.first_run_body(self.chosen_start()))
 
     def request_check(self):
         self.check_requested.emit(self.chosen_start())

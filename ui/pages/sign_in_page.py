@@ -1,10 +1,9 @@
 """Connect to Spotify through the browser, with a way out if the browser never comes back."""
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
-from ui.resources import resource_path
 from ui.widgets.controls import button, label, scroll_column
+from ui.widgets.wordmark import Wordmark
 
 IDLE_TEXT = "wavvie checks who you follow on Spotify and saves their new songs to a private playlist."
 WAITING_TEXT = "Waiting for you to approve wavvie in your browser…"
@@ -16,11 +15,8 @@ class SignInPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.scroll, layout = scroll_column(self, top=72)
-        self.logo = QLabel()
-        self.logo.setPixmap(QPixmap(str(resource_path("wavvie_wordmark_white.png")))
-                            .scaledToHeight(64, Qt.SmoothTransformation))
-        self.logo.setAccessibleName("wavvie")
+        self.scroll, layout = scroll_column(self, top=40, centred=True)
+        self.logo = Wordmark(60)
         layout.addWidget(self.logo, 0, Qt.AlignLeft)
         layout.addSpacing(12)
         # The no-break space keeps "you follow" together, so "follow" never wraps onto a line alone.
@@ -41,7 +37,6 @@ class SignInPage(QWidget):
         actions.addStretch()
         layout.addSpacing(8)
         layout.addLayout(actions)
-        layout.addStretch()
         self.btn_connect.clicked.connect(self.connect_requested.emit)
         self.btn_cancel.clicked.connect(self.cancel_requested.emit)
 

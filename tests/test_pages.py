@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication
 
 from ui.pages.setup_page import SetupPage
 from ui.pages.sign_in_page import SignInPage
+from ui.widgets.wordmark import Wordmark
 
 REDIRECT = 'http://127.0.0.1:8888/callback'
 
@@ -73,6 +74,11 @@ class SignInPageTests(unittest.TestCase):
         page = SignInPage()
         self.addCleanup(page.deleteLater)
         self.assertEqual(page.headline.text(), 'New music from the artists you follow')
+
+    def test_the_logo_is_drawn_from_its_vector_outline(self):
+        page = SignInPage()
+        self.addCleanup(page.deleteLater)
+        self.assertIsInstance(page.logo, Wordmark)
 
 
 if __name__ == '__main__':

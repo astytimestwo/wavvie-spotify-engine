@@ -5,8 +5,8 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from PySide6.QtCore import QSettings, Qt, QThreadPool, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
+from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from core.history import CheckHistory, CheckRecord, playlist_description, playlist_name
 from core.models import ScanConfiguration, Track
@@ -24,6 +24,7 @@ from ui.widgets.activity_log import ActivityLog, ActivityLogDialog
 from ui.widgets.avatar import Avatar
 from ui.widgets.controls import button, centre
 from ui.widgets.focus_rings import FocusRings
+from ui.widgets.wordmark import Wordmark
 
 SOME_ARTISTS_FAILED = "Some artists couldn't be checked. Your next check will look at these dates again."
 PARTLY_SAVED = ("Spotify stopped responding while adding songs. Open the playlist to check it; "
@@ -85,10 +86,7 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout(bar)
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(16)
-        self.wordmark = QLabel()
-        self.wordmark.setPixmap(QPixmap(str(resource_path("wavvie_wordmark_white.png")))
-                                .scaledToHeight(28, Qt.SmoothTransformation))
-        self.wordmark.setAccessibleName("wavvie")
+        self.wordmark = Wordmark(28)
         self.avatar = Avatar(30)
         self.btn_settings = button("Settings", "quiet", "openSettings")
         # Settings hides while its page is open; keeping its space stops the avatar jumping.
@@ -227,7 +225,8 @@ class MainWindow(QMainWindow):
         self.avatar.set_user(name)
         images = user.get('images') or []
         if images:
-            self.download_image(images[0]['url'], lambda image: self.avatar.set_user(name, image), 64)
+            self.download_image(images[0]['url'], lambda image: self.avatar.set_user(name, image),
+                                max(64, round(self.avatar.width() * self.devicePixelRatioF())))
         self.settings_page.set_account(name)
         stored = QSettings("wavvie", "SpotifyPlaylistCreator").value(self.history_key(), "", type=str)
         self.history = CheckHistory.from_json(stored)
@@ -427,7 +426,9 @@ class MainWindow(QMainWindow):
         self.launch_worker(worker)
 
     def load_artwork(self, url):
-        self.download_image(url, lambda image: self.home_page.set_artwork(url, image), 80)
+        # Rows show 40 px artwork; fetch enough pixels for the display's scale.
+        size = max(80, round(40 * self.devicePixelRatioF()))
+        self.download_image(url, lambda image: self.home_page.set_artwork(url, image), size)
 
     def open_settings(self):
         if self.service.user_data:

@@ -31,6 +31,8 @@ from fake_spotify import FakeSpotifyWebAPI, album, artist_ref, track as api_trac
 from ui.font_loader import load_bundled_fonts
 from ui.main_window import MainWindow, PendingSave
 from ui.messages import keep_together
+from ui.widgets.tide import Tide
+from ui.widgets.wordmark import Wordmark
 
 NOVA = artist_ref('nova', 'Nova')
 KITE = artist_ref('kite', 'Kite')
@@ -318,6 +320,7 @@ class DesktopFlowTests(unittest.TestCase):
 
     def test_the_header_lines_up_with_the_column_and_stays_put(self):
         home = self.sign_in()
+        self.assertIsInstance(self.window.wordmark, Wordmark)  # vector, so sharp at any display scale
         self.window.show()
         for width, height in ((720, 560), (900, 680), (1600, 1000)):
             self.window.resize(width, height)
@@ -361,6 +364,35 @@ class DesktopFlowTests(unittest.TestCase):
                 focused = self.app.focusWidget()
                 with self.subTest(page=type(page).__name__, stop=type(focused).__name__):
                     self.assertIsInstance(focused, (QAbstractButton, QComboBox, QAbstractSpinBox))
+
+    def test_short_screens_sit_a_little_above_the_middle_over_the_tide(self):
+        home = self.sign_in()  # first run: a headline, a sentence and one button
+        sign_in = self.window.sign_in_page
+        sign_in.show_idle()
+        self.window.show()
+        self.window.resize(900, 680)
+        for page, first, last in ((home, home.headline, home.btn_primary), (sign_in, sign_in.logo, sign_in.btn_connect)):
+            self.window.show_page(page)
+            self.app.processEvents()
+            viewport = page.scroll.viewport()
+            above = first.mapTo(viewport, QPoint(0, 0)).y()
+            below = viewport.height() - Tide.HEIGHT - last.mapTo(viewport, QPoint(0, last.height())).y()
+            with self.subTest(page=type(page).__name__):
+                self.assertIsInstance(page.scroll.widget(), Tide)
+                self.assertGreater(below, 0)  # the tide keeps its own strip
+                self.assertAlmostEqual(above / (above + below), 0.4, delta=0.06)
+
+    def test_long_screens_scroll_from_the_top_and_end_above_the_tide(self):
+        home = self.sign_in()
+        self.window.show()
+        self.window.resize(720, 560)
+        home.show_done('wavvie', 'https://open.spotify.com/playlist/p', [track(number) for number in range(30)])
+        self.app.processEvents()
+        content = home.scroll.widget()
+        self.assertGreater(content.height(), home.scroll.viewport().height())
+        self.assertEqual(home.headline.mapTo(content, QPoint(0, 0)).y(), 20)
+        last = home.song_rows[-1]
+        self.assertLessEqual(last.mapTo(content, QPoint(0, last.height())).y(), content.height() - Tide.HEIGHT)
 
     def test_a_failed_sign_in_keeps_the_redirect_uri_on_one_line(self):
         self.window.on_auth_error('boom')

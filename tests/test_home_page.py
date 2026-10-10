@@ -3,9 +3,10 @@ import os
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch
 
 from PySide6.QtCore import QDate, QPoint, Qt
-from PySide6.QtGui import QColor, QTextFormat
+from PySide6.QtGui import QColor, QImage, QTextFormat
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFrame, QLabel
 
@@ -141,6 +142,29 @@ class HomePageTests(unittest.TestCase):
         self.assertEqual(len({found.mapTo(self.page, QPoint(found.width(), 0)).x() for found in counts}), 1)
         # One hairline above "Earlier checks", then one between each pair of rows.
         self.assertEqual(len(self.rules(self.page.history_box)), 3)
+
+    def test_artwork_is_kept_at_the_display_resolution(self):
+        self.page.show_done('wavvie', 'u', [song(1, art='art-1')])
+        row = self.page.song_rows[0]
+        artwork = QImage(80, 80, QImage.Format_RGB32)
+        artwork.fill(QColor('#E07A5F'))
+        handed_over = []
+        # QLabel re-fits pixmaps to its real (offscreen: 1x) ratio, so check what the row gives it.
+        with patch.object(row.art, 'devicePixelRatioF', return_value=2.0),              patch.object(row.art, 'setPixmap', side_effect=handed_over.append):
+            self.page.set_artwork('art-1', artwork)
+        pixmap = handed_over[-1]
+        self.assertEqual((pixmap.width(), pixmap.height(), pixmap.devicePixelRatio()), (80, 80, 2.0))
+
+    def test_a_changed_first_check_date_is_described_as_chosen(self):
+        self.page.show_ready(NextWindow(days_ago(7), 'first'), 325, 7, [])
+        self.assertIn('in the last 7 days', self.page.body.text())
+        self.page.btn_quiet.click()
+        chosen = days_ago(40)
+        self.page.date_start.setDate(QDate(chosen.year, chosen.month, chosen.day))
+        self.assertIn(f'since {short_date(chosen)}', self.page.body.text())
+        self.assertNotIn('7 days', self.page.body.text())
+        self.page.btn_reset_dates.click()
+        self.assertIn('in the last 7 days', self.page.body.text())
 
     def test_done_variants_name_partial_saves_and_json_copies(self):
         copy = os.path.join('folder', 'tracklist_1.json')

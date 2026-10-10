@@ -9,7 +9,7 @@ a = Analysis(
         ('resources/loubag-regular-1782520865-0.zip', 'resources'),
         ('resources/loubag-ultralight-1782520861-0.zip', 'resources'),
         ('resources/Agrandir-Font-Family.zip', 'resources'),
-        ('resources/wavvie_wordmark_white.png', 'resources'),
+        ('resources/wavvie_wordmark.svg', 'resources'),
         ('resources/wavvie_icon_1024.png', 'resources'),
         ('resources/wavvie_icon_512.png', 'resources'),
         ('resources/wavvie_icon_256.png', 'resources'),

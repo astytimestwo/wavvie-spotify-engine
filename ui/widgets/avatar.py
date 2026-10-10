@@ -29,8 +29,11 @@ class Avatar(QWidget):
         clip.addEllipse(QRectF(self.rect()))
         painter.setClipPath(clip)
         if self.image is not None and not self.image.isNull():
-            scaled = self.image.scaled(self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
-            painter.drawImage((self.width() - scaled.width()) // 2, (self.height() - scaled.height()) // 2, scaled)
+            # Draw straight from the full-size picture so high-density displays get every pixel.
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            side = min(self.image.width(), self.image.height())
+            square = QRectF((self.image.width() - side) / 2, (self.image.height() - side) / 2, side, side)
+            painter.drawImage(QRectF(self.rect()), self.image, square)
             return
         painter.fillRect(self.rect(), QColor(Theme.RAISED))
         font = painter.font()
