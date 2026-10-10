@@ -1,4 +1,5 @@
 """Service behaviour against the Spotify Web API contract for Development Mode apps."""
+import threading
 import unittest
 from datetime import datetime
 
@@ -94,6 +95,23 @@ class SpotifyWebApiTests(unittest.TestCase):
 
         self.assertEqual([t['track_name'] for t in tracks], ['Glow'])
         self.assertEqual(len(self.api.requested('GET', '/albums/glow/tracks')), 1)
+
+    def test_cancelling_during_a_rate_limit_wait_reports_no_warnings(self):
+        route = self.api.route
+        self.api.route = lambda method, path, query, body: (
+            (429, {'error': {'status': 429, 'message': 'API rate limit exceeded'}}) if path.endswith('/albums')
+            else route(method, path, query, body))
+        waiting = threading.Event()
+        self.service.register_callback('rate_limit_encountered', lambda seconds: waiting.set())
+        scan = threading.Thread(target=self.service.get_artist_albums_robust, args=('nova', 'Nova', CUTOFF))
+        scan.start()
+        self.assertTrue(waiting.wait(5))
+
+        self.service.cancel_scan()
+        scan.join(5)
+
+        self.assertFalse(scan.is_alive())
+        self.assertEqual(self.warnings, [])
 
     def test_singles_with_four_or_more_tracks_are_labelled_ep(self):
         self.api.artist_albums['nova'] = {'single': [

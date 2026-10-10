@@ -46,6 +46,9 @@ class SpotifyReleaseService:
         self.callbacks[event_name] = callback
 
     def trigger_callback(self, event_name: str, *args, **kwargs):
+        if event_name == "warning" and self.cancelled:
+            # A cancelled operation's results are discarded; its interrupted requests are not worth warning about.
+            return
         if event_name in self.callbacks:
             try:
                 self.callbacks[event_name](*args, **kwargs)
