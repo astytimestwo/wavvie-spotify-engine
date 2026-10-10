@@ -164,11 +164,21 @@ class MainWindow(QMainWindow):
         return not self.operation and not self.closing
 
     def launch_worker(self, worker):
-        # Keep signal objects alive until queued completion reaches the GUI thread.
+        # The window owns each job's signals and deletes them on the UI thread once the job reports back.
+        # Left to Python they'd die wherever the last reference dropped, often the pool thread, and a Qt
+        # object destroyed off its own thread crashes now and then. The pool is the window's first child,
+        # so it is torn down first and waits for running jobs.
         key = id(worker)
         self._workers[key] = worker
-        worker.signals.finished.connect(lambda *args: self._workers.pop(key, None))
-        worker.signals.error.connect(lambda *args: self._workers.pop(key, None))
+        signals = worker.signals
+        signals.setParent(self)
+
+        def release(*args):
+            self._workers.pop(key, None)
+            signals.deleteLater()
+
+        signals.finished.connect(release)
+        signals.error.connect(release)
         self.thread_pool.start(worker)
 
     def open_url(self, url):

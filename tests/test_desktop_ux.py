@@ -17,7 +17,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, QSettings, Qt, QThread, QUrl
+from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, QRunnable, QSettings, Qt, QThread, QUrl
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QScrollArea
@@ -26,7 +26,7 @@ import main
 from core.history import CheckHistory, CheckRecord, playlist_name, short_date
 from core.models import Track, ScanConfiguration, ScanResult, PlaylistResult
 from core.spotify_service import SpotifyReleaseService
-from core.workers import AuthWorker, ScanWorker, ImageLoadWorker, LoadArtistsWorker
+from core.workers import AuthWorker, ScanWorker, ImageLoadWorker, LoadArtistsWorker, WorkerSignals
 from fake_spotify import FakeSpotifyWebAPI, album, artist_ref, track as api_track
 from ui.font_loader import load_bundled_fonts
 from ui.main_window import MainWindow, PendingSave
@@ -505,6 +505,36 @@ class DesktopFlowTests(unittest.TestCase):
         self.assertIn('Loaded 2 artists from cache', QGuiApplication.clipboard().text())
         dialog.btn_close.click()
         self.assertFalse(dialog.isVisible())
+
+    def test_a_finished_job_lets_go_of_its_signals_on_the_ui_thread(self):
+        # A Qt object must be destroyed on the thread it lives on. A job's completion can reach the UI
+        # thread before the pool thread lets go of the job, which would destroy its signals there.
+        release = threading.Event()
+        destroyed_on_ui_thread = []
+
+        class SlowToLetGo(QRunnable):
+            def __init__(self):
+                super().__init__()
+                self.signals = WorkerSignals()
+
+            def run(self):
+                self.signals.finished.emit(None)
+                release.wait(5)
+
+        job = SlowToLetGo()
+        job.signals.destroyed.connect(
+            lambda *_: destroyed_on_ui_thread.append(threading.current_thread() is threading.main_thread()),
+            Qt.DirectConnection)
+        handled = []
+        job.signals.finished.connect(lambda *_: handled.append(True))
+        self.window.launch_worker(job)
+        del job
+        self.wait_until(lambda: handled)
+        QTest.qWait(20)  # every completion handler, including the window's own, has run
+        release.set()  # now the pool thread lets go
+        self.window.thread_pool.waitForDone(3000)
+        QTest.qWait(50)  # deferred deletes run here
+        self.assertEqual(destroyed_on_ui_thread, [True])
 
     def test_image_completion_is_delivered_on_the_ui_thread(self):
         for index in range(5):
