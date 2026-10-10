@@ -91,6 +91,11 @@ class TestSpotifyReleaseService(unittest.TestCase):
         # Clean album
         self.assertFalse(self.service.is_trashy_compilation({"album_type": "album", "name": "Migration"}))
 
+    def test_portuguese_compilation_titles_are_skipped(self):
+        for name in ("Melhores Músicas do Ano", "Coletânea Verão"):
+            with self.subTest(name=name):
+                self.assertTrue(self.service.is_trashy_compilation({"album_type": "album", "name": name}))
+
     def test_prioritize_album_version(self):
         track_album = {"album_type": "album", "album_name": "Migration", "release_date": "2017-01-13"}
         track_single = {"album_type": "single", "album_name": "Kerala", "release_date": "2016-11-03"}

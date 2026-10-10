@@ -261,13 +261,13 @@ class SpotifyReleaseService:
         skip_keywords = [
             'greatest hits', 'best of', 'hits collection', 'anthology',
             'internacionais', 'treino', 'musicas internacionais', 'malhar',
-            'as melhores', 'as mais tocadas', 'melhores mÃºsicas',
+            'as melhores', 'as mais tocadas', 'melhores músicas',
             'workout', 'gym', 'fitness', 'running', 'cardio',
             'top hits', 'chart hits', 'pop hits', 'radio hits',
             'ultimate collection', 'essential', 'platinum collection',
             'gold collection', 'mega hits', 'super hits', 'hit parade',
             'para gostosas', 'para malhar', 'para treinar',
-            'compilation', 'coletÃ¢nea', 'various artists'
+            'compilation', 'coletânea', 'various artists'
         ]
         
         if album_type == 'compilation':
