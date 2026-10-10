@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from PySide6.QtCore import QSettings, Qt, QThreadPool, QTimer, QUrl
-from PySide6.QtGui import QAction, QDesktopServices, QIcon, QKeySequence
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from core.history import CheckHistory, CheckRecord, playlist_description, playlist_name
@@ -18,7 +18,7 @@ from ui.pages.home_page import HomePage
 from ui.pages.settings_page import SettingsPage, read_preferences
 from ui.pages.setup_page import SetupPage
 from ui.pages.sign_in_page import SignInPage
-from ui.resources import resource_path
+from ui.resources import app_icon
 from ui.theme import Theme
 from ui.widgets.activity_log import ActivityLog, ActivityLogDialog
 from ui.widgets.avatar import Avatar
@@ -48,7 +48,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("wavvie")
-        self.setWindowIcon(QIcon(str(resource_path("wavvie.ico"))))
+        self.setWindowIcon(app_icon())
         self.setMinimumSize(720, 560)
         self.resize(900, 680)
         self.setStyleSheet(Theme.get_style_sheet())

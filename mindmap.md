@@ -50,7 +50,7 @@ mindmap
 
 | Location | Responsibility and relationships |
 | --- | --- |
-| `app.py` | Loads environment, creates QApplication, loads fonts/icon, opens MainWindow. |
+| `app.py` | A packaged build first moves into its own folder (`use_app_folder`), so `.env` and caches live beside the executable wherever it was launched from. Then it loads the environment, creates the QApplication, loads fonts and the icon, and opens MainWindow. With `WAVVIE_SMOKE_TEST` set it quits after showing the window, which CI uses to prove a build starts. |
 | `main.py` | Environment discovery, argument validation, CLI logging callbacks, authentication, scan, export, playlist creation. Importing it also loads environment and configures logging. |
 | `core/spotify_service.py` | Shared business logic and Spotify calls; independent of Qt. Owns authentication, cancellation flag, callback registry, scanning, caches, and outputs. |
 | `core/models.py` | `ScanConfiguration` inputs; `ScanProgress` events; `Track`, `ScanResult`, and `PlaylistResult` outputs. `Artist` and `Album` dataclasses exist but the service principally uses raw dictionaries for these entities. |
@@ -63,8 +63,9 @@ mindmap
 | `ui/pages/settings_page.py` | Account and Disconnect, first-check look-back, and advanced options (artist range, parallel checks, JSON copy, reduced motion, refresh artists, activity log). Saves on change; `read_preferences()` is the only reader. |
 | `ui/messages.py` | Plain-language Spotify and network errors (`friendly_error`), and `keep_together` so a URL never wraps mid-address. |
 | `ui/theme.py`, `ui/widgets/*` | "Low tide" palette and role-based stylesheet; builders for labels, buttons, rules and the centred 600 px column; `WaveLine`, `Avatar`, the `ActivityLog` dialog and `ElidedLabel`. `FocusRings` shows focus indicators only after keyboard use. `Wordmark` draws the logo from `resources/wavvie_wordmark.svg`, a vector trace of the PNG master, so it stays sharp at any display scale; `Tide` paints three calm waves along the foot of every page. |
-| `ui/resources.py`, `ui/font_loader.py` | Resolves source versus PyInstaller resource paths; loads Loubag/Agrandir fonts directly from bundled ZIPs. |
-| `Wavefeed.spec` | Packages `app.py` and explicit font/branding assets into windowed `dist/wavvie.exe`; spec filename retains an older name. |
+| `ui/resources.py`, `ui/font_loader.py` | Resolves source versus PyInstaller resource paths and builds the window icon from the `wavvie_mark_*.png` sizes (the `.ico` is only the Windows executable's own icon); loads Loubag/Agrandir fonts directly from bundled ZIPs. |
+| `Wavefeed.spec` | Packages `app.py` and the resources the app loads into one windowed file: `dist/wavvie.exe` on Windows, `dist/wavvie` on Linux. A test checks that every resource the code loads is listed. The spec filename retains an older name. |
+| `.github/workflows/release.yml`, `.github/scripts/ci.py` | On every push, Windows and Linux (Ubuntu 22.04, for an older glibc) runners run the tests, build the app and launch it once in smoke-test mode. A `v*` tag also publishes `wavvie-windows-x64.exe` and `wavvie-linux-x86_64.tar.gz` as a GitHub release. `ci.py` repeats failures as annotations, which the API serves without signing in (job logs need a token). |
 | `tests/fake_spotify.py` | In-memory Spotify Web API transport for tests; models the Development Mode routes listed below and can refuse, silently cap or accept 50-item pages. |
 
 ## End-to-end relations
@@ -154,7 +155,7 @@ A live check on 2026-10-10 with a Development Mode app found the documentation s
 | Working data | Service account/client state, the pending save, activity log lines (newest 2,000) and the URL-keyed artwork cache (256 images) live in memory. |
 | Build/runtime dependencies | `spotipy>=2.26.0` (the `/items` playlist routes); unpinned `requests`, `python-dotenv`, `PySide6`, `pillow`, `pyinstaller` in requirements.txt; runtime and build dependencies share one file. |
 
-Credentials, caches, exports, virtual environments, and build outputs are gitignored. Never add credential/token values to this map. No tracked CI workflow was found during this assessment.
+Credentials, caches, exports, virtual environments, and build outputs are gitignored. Never add credential/token values to this map. CI is described in the module table.
 
 ## UX improvements and remaining verification
 
@@ -178,7 +179,7 @@ The UI/UX pass on 2026-09-06 resolved the original duplicate-count, artwork impo
 
 - Discovery heuristics (queries, title keywords, first-completed global selection) are unchanged apart from paging and feature-note handling in signatures. The live check covered the CLI path; the 10-item fallback has only run against the fake, and the helper window has not been run against Spotify.
 - The activity log is session-only. A created or partly filled playlist has no rollback; its link stays in the check history, and the next check covers the window again.
-- Token, artist-cache, `.env` (written by Setup) and JSON-copy files are relative to the working directory, so a packaged app started with an unexpected working directory writes them there.
+- Token, artist-cache, `.env` (written by Setup) and JSON-copy files are relative to the working directory. Packaged builds move into their own folder first, so they need a folder the user can write to; a read-only install location means Setup can't save and the sign-in isn't remembered.
 
 ## Validation baseline
 
@@ -190,7 +191,7 @@ Validation on 2026-09-06: 50 tests passed, plus the layout test at 150% display 
 
 `tests/test_spotify_web_api.py` runs the real spotipy client against `tests/fake_spotify.py`, covering refused, silently capped and accepted 50-item pages. `tests/test_cli.py` covers CLI orchestration with a stand-in service. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
 
-Final validation on 2026-10-10, after the helper rework: **126 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. Every state was rendered offscreen at 900×680 and 720×560 and reviewed by eye, and keyboard focus was checked by tabbing through Home and Settings on the native Windows platform (windows11 style).
+Final validation on 2026-10-10, after adding release builds: **131 tests passed** in three consecutive full runs, and a local PyInstaller build of `wavvie.exe` started and quit cleanly in smoke-test mode. Linux is verified by the CI runners. After the helper rework: 126 tests passed in three consecutive full runs, plus the layout test at **150% display scaling**. Every state was rendered offscreen at 900×680 and 720×560 and reviewed by eye, and keyboard focus was checked by tabbing through Home and Settings on the native Windows platform (windows11 style).
 
 Live check on 2026-10-10 (Development Mode app, CLI): sign-in, 325 followed artists, and a five-artist scan of artists 1–5 since 2026-09-10 (5 tracks in 22 seconds, previously 55 seconds with fixed 10-item pages). Also covered: JSON export, and one private playlist created with `POST /me/playlists`. Its 5 items were added with `/items` and read back unique and in export order. That run also found the feature-note duplicate and the missing `main_artist` on album-found features, both since fixed. The image-completion test now waits for both the UI-thread callback and worker release (30 of 30 isolated runs passed). Use `python -m unittest discover -s tests -v`; the desktop regression module selects Qt's offscreen platform. On Windows, run in an environment that permits temporary-file creation and cleanup. `git diff --check` should also pass.
 

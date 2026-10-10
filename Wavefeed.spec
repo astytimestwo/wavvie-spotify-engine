@@ -1,4 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
+# Builds dist/wavvie.exe on Windows and dist/wavvie on Linux:
+#     python -m PyInstaller --clean --noconfirm Wavefeed.spec
+import sys
 
 
 a = Analysis(
@@ -10,18 +13,12 @@ a = Analysis(
         ('resources/loubag-ultralight-1782520861-0.zip', 'resources'),
         ('resources/Agrandir-Font-Family.zip', 'resources'),
         ('resources/wavvie_wordmark.svg', 'resources'),
-        ('resources/wavvie_icon_1024.png', 'resources'),
-        ('resources/wavvie_icon_512.png', 'resources'),
-        ('resources/wavvie_icon_256.png', 'resources'),
-        ('resources/wavvie_mark_1024.png', 'resources'),
-        ('resources/wavvie_mark_512.png', 'resources'),
         ('resources/wavvie_mark_256.png', 'resources'),
         ('resources/wavvie_mark_128.png', 'resources'),
         ('resources/wavvie_mark_64.png', 'resources'),
         ('resources/wavvie_mark_48.png', 'resources'),
         ('resources/wavvie_mark_32.png', 'resources'),
         ('resources/wavvie_mark_16.png', 'resources'),
-        ('resources/wavvie.ico', 'resources'),
         ('resources/checkmark.svg', 'resources'),
         ('resources/chevron_down.svg', 'resources'),
     ],
@@ -49,7 +46,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
-    icon='resources/wavvie.ico',
+    icon='resources/wavvie.ico' if sys.platform == 'win32' else None,  # the .exe's own icon; Linux has none
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

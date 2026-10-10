@@ -3,7 +3,8 @@
 </p>
 
 <p align="center">
-  <img alt="Desktop app: Windows" src="https://img.shields.io/badge/desktop-Windows-163338?style=flat-square">
+  <a href="https://github.com/astytimestwo/wavvie-spotify-engine/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/astytimestwo/wavvie-spotify-engine?style=flat-square&color=F7C873&labelColor=163338"></a>
+  <img alt="Desktop app: Windows, Linux" src="https://img.shields.io/badge/desktop-Windows%20%7C%20Linux-163338?style=flat-square">
   <img alt="Command line: Windows, macOS, Linux" src="https://img.shields.io/badge/CLI-Windows%20%7C%20macOS%20%7C%20Linux-163338?style=flat-square">
   <img alt="Built with PySide6" src="https://img.shields.io/badge/built%20with-PySide6-1D4047?style=flat-square">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-F7C873?style=flat-square&labelColor=163338"></a>
@@ -53,21 +54,28 @@
 
 New Spotify apps run in Development Mode: the app's owner needs Spotify Premium, and at most five people can use it.
 
-### 2. Install
+### 2. Download wavvie
 
-You need Python and pip. wavvie is developed and tested with Python 3.14.
+| Platform | Download |
+| --- | --- |
+| Windows | [wavvie-windows-x64.exe](https://github.com/astytimestwo/wavvie-spotify-engine/releases/latest/download/wavvie-windows-x64.exe) |
+| Linux (x86-64) | [wavvie-linux-x86_64.tar.gz](https://github.com/astytimestwo/wavvie-spotify-engine/releases/latest/download/wavvie-linux-x86_64.tar.gz) |
 
-```bash
-git clone https://github.com/astytimestwo/wavvie-spotify-engine.git
-cd wavvie-spotify-engine
-pip install -r requirements.txt
-```
+These links always fetch the latest version; older ones are on the [releases page](https://github.com/astytimestwo/wavvie-spotify-engine/releases).
 
-### 3. Run the desktop app
+- **Windows:** run the `.exe`. It isn't code-signed, so Windows may say it's from an unknown publisher: choose **More info**, then **Run anyway**.
+- **Linux:** unpack it and start it:
 
-```bash
-python app.py
-```
+  ```bash
+  tar -xzf wavvie-linux-x86_64.tar.gz
+  ./wavvie
+  ```
+
+  If Qt says it can't load the "xcb" platform plugin, install `libxcb-cursor0` (Debian, Ubuntu) or `xcb-util-cursor` (Fedora, Arch).
+
+Keep wavvie in a folder you can write to: it saves its settings file (`.env`) and your sign-in beside itself.
+
+### 3. Connect it
 
 The first run asks for your Client ID and secret and saves them to `.env`. **Connect Spotify** then opens your browser so you can approve the app.
 
@@ -75,15 +83,22 @@ The first run asks for your Client ID and secret and saves them to `.env`. **Con
   <img src="docs/media/setup.gif" alt="First run: pasting the Client ID and secret, approving wavvie in the browser, then the home screen">
 </p>
 
-The desktop app is tested on Windows. It's plain PySide6, so it may run on macOS and Linux too, but that isn't tested.
+### Or run from source
 
-There's no published release yet. To build a Windows executable yourself:
+You need Python and pip; wavvie is developed and tested with Python 3.14. On Linux, Qt may also need `libxcb-cursor0` as above.
+
+```bash
+git clone https://github.com/astytimestwo/wavvie-spotify-engine.git
+cd wavvie-spotify-engine
+pip install -r requirements.txt
+python app.py
+```
+
+It may run on macOS too, but that isn't tested. To build the app yourself, run this on Windows for the `.exe` or on Linux for the Linux app; it appears in `dist/`:
 
 ```bash
 python -m PyInstaller --clean --noconfirm Wavefeed.spec
 ```
-
-The app appears at `dist/wavvie.exe`.
 
 ## Command line
 
@@ -126,6 +141,13 @@ The images in this README are rendered from the app with made-up data:
 
 ```bash
 python docs/media/make_media.py
+```
+
+Every push runs the tests on Windows and Linux, then builds both apps and launches each once ([workflow](.github/workflows/release.yml)). To publish a release, set the version in `app.py`, then push a matching tag; the workflow attaches both builds to a new GitHub release:
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 [mindmap.md](mindmap.md) maps the implementation: modules, data flow, Spotify API constraints, state and the latest validation runs.
