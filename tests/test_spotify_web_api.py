@@ -86,6 +86,65 @@ class SpotifyWebApiTests(unittest.TestCase):
 
         self.assertEqual([a['id'] for a in albums], ['new5', 'new9'])
 
+    def test_uses_50_item_album_pages_where_spotify_still_allows_them(self):
+        self.api.page_limit = 50
+        unordered = [album(f'kite{n}', f'Kite {n}', 'single', f'{2000 + n % 20}-01-01', [KITE]) for n in range(120)]
+        self.api.artist_albums['nova'] = {'appears_on': unordered}
+
+        self.service.get_artist_albums_robust('nova', 'Nova', CUTOFF)
+
+        self.assertEqual(self.album_requests('appears_on'), ['0', '50', '100'])
+
+    def test_search_takes_each_query_in_one_request_where_allowed(self):
+        self.api.page_limit = 50
+        self.api.search_tracks = [kite_feature(number, '2026-09-20') for number in range(40)]
+
+        self.service.get_artist_collaborations('nova', 'Nova', CUTOFF)
+
+        self.assertEqual(len(self.api.requested('GET', '/search')), 6)
+
+    def test_falls_back_to_10_item_pages_once_spotify_refuses_larger_ones(self):
+        self.api.artist_albums['nova'] = {'single': [nova_single('new1', '2026-09-15')]}
+        self.api.artist_albums['kite'] = {'single': [album('kite1', 'Kite 1', 'single', '2026-09-16', [KITE])]}
+
+        found = [self.service.get_artist_albums_robust(artist_id, name, CUTOFF)
+                 for artist_id, name in (('nova', 'Nova'), ('kite', 'Kite'))]
+
+        self.assertEqual([[a['id'] for a in albums] for albums in found], [['new1'], ['kite1']])
+        self.assertEqual(self.api.refused, 1)
+
+    def test_unrelated_bad_requests_keep_large_pages(self):
+        self.api.page_limit = 50
+        route = self.api.route
+        self.api.route = lambda method, path, query, body: (
+            (400, {'error': {'status': 400, 'message': 'Malformed search query'}}) if path == '/search'
+            else route(method, path, query, body))
+
+        self.service.get_artist_collaborations('nova', 'Nova', CUTOFF)
+        self.service.get_artist_albums_robust('nova', 'Nova', CUTOFF)
+
+        self.assertEqual(self.api.requested('GET', '/artists/nova/albums')[0]['limit'], '50')
+
+    def test_reads_every_page_when_spotify_caps_the_page_size_silently(self):
+        self.api.large_pages = 'clamp'
+        older = [album(f'kite{n}', f'Kite {n}', 'single', f'{2000 + n}-01-01', [KITE]) for n in range(24)]
+        self.api.artist_albums['nova'] = {'appears_on': older + [album('late', 'Late', 'single', '2026-09-20', [KITE])]}
+
+        albums = self.service.get_artist_albums_robust('nova', 'Nova', CUTOFF)
+
+        self.assertEqual([a['id'] for a in albums], ['late'])
+
+    def test_feature_notes_do_not_split_one_song_into_two_tracks(self):
+        # Seen live: two editions of one album, one title missing its closing parenthesis.
+        self.api.artist_albums['nova'] = {'appears_on': [album('edition1', 'Sky', 'album', '2026-10-02', [KITE])]}
+        self.api.album_tracks['edition1'] = [track('t1', 'Baby Breath (feat. Nova)', [KITE, NOVA])]
+        edition2 = album('edition2', 'Sky', 'album', '2026-10-01', [KITE])
+        self.api.search_tracks = [track('t2', 'Baby Breath (feat. Nova', [KITE, NOVA], edition2)]
+
+        tracks = self.service.get_new_tracks('nova', 'Nova', CUTOFF)
+
+        self.assertEqual([t['track_id'] for t in tracks], ['t1'])
+
     def test_repeated_album_listings_are_scanned_once(self):
         glow = album('glow', 'Glow', 'single', '2026-09-12', [NOVA])
         self.api.artist_albums['nova'] = {'single': [glow, glow]}

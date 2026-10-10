@@ -7,6 +7,7 @@ import time
 import logging
 import json
 import os
+import re
 import sys
 import urllib.request
 from urllib.parse import urlparse
@@ -16,6 +17,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from core.models import Artist, Album, Track, ScanConfiguration, ScanProgress, ScanResult, PlaylistResult
 
 logger = logging.getLogger(__name__)
+
+# "(feat. X)" / "[ft. X]" notes in titles, including ones missing their closing bracket.
+FEATURE_NOTE = re.compile(r'\s*[(\[]\s*(?:feat|ft|featuring)\b[^)\]]*[)\]]?', re.IGNORECASE)
 
 class SpotifyReleaseService:
     def __init__(self, client_id: Optional[str] = None, client_secret: Optional[str] = None, 
@@ -34,8 +38,9 @@ class SpotifyReleaseService:
         self.max_retries = 3
         self.sleep_between_requests = 1.2
         self.max_tracks_per_batch = 100
-        # Spotify allows Development Mode apps at most 10 search results or artist albums per page.
-        self.page_size = 10
+        # Spotify documents at most 10 search results or artist albums per page for Development Mode
+        # apps, yet still serves 50 to some of them. Start at 50 and drop to 10 if Spotify refuses.
+        self.page_size = 50
         self.max_search_results = 30
         self.max_releases_per_group = 200
         
@@ -162,6 +167,20 @@ class SpotifyReleaseService:
         
         raise Exception(f"Max retries ({self.max_retries}) exceeded")
 
+    def fetch_page(self, func, *args, limit: Optional[int] = None, **kwargs):
+        """Request one page from a paged endpoint, falling back to 10 items if Spotify refuses more."""
+        limit = min(limit or self.page_size, self.page_size)
+        try:
+            return self.safe_api_call(func, *args, limit=limit, **kwargs)
+        except SpotifyException as e:
+            # spotipy's message is "<request URL>:\n <Spotify's message>"; the URL itself contains "limit=".
+            message = str(e.msg).strip().splitlines()[-1].lower()
+            if e.http_status != 400 or limit <= 10 or 'limit' not in message:
+                raise
+            logger.info(f"Spotify refused {limit} items per page; using 10.")
+            self.page_size = 10
+            return self.safe_api_call(func, *args, limit=10, **kwargs)
+
     def parse_release_date(self, date_str: str) -> Optional[datetime]:
         if not date_str:
             return None
@@ -177,7 +196,10 @@ class SpotifyReleaseService:
             return None
 
     def create_track_signature(self, track_name: str, all_artists: List[str]) -> str:
-        return f"{track_name.lower()}|{'|'.join(sorted([a.lower() for a in all_artists]))}"
+        # Featured artists are already in the artist list. Dropping the title's note also matches
+        # catalog copies whose note differs, such as one missing its closing parenthesis.
+        title = FEATURE_NOTE.sub('', track_name).strip()
+        return f"{title.lower()}|{'|'.join(sorted([a.lower() for a in all_artists]))}"
 
     def get_followed_artists(self) -> List[Dict[str, Any]]:
         artists = []
@@ -375,8 +397,7 @@ class SpotifyReleaseService:
                 if self.cancelled:
                     return all_albums
                 try:
-                    result = self.safe_api_call(self.sp.artist_albums, artist_id, include_groups=group,
-                                                limit=self.page_size, offset=offset)
+                    result = self.fetch_page(self.sp.artist_albums, artist_id, include_groups=group, offset=offset)
                 except Exception as e:
                     logger.error(f"Error fetching {group} releases at offset {offset} for {artist_name}: {e}")
                     self.trigger_callback("warning", f"Some releases for {artist_name} could not be loaded: {e}")
@@ -403,9 +424,10 @@ class SpotifyReleaseService:
 
                 # Spotify usually lists a group newest first, so stop once results pass the
                 # cutoff, but keep reading when this artist's releases arrive in another order.
-                if len(items) < self.page_size or (passed_cutoff and newest_first):
+                # Follow `next` rather than page length: Spotify may serve fewer items than asked.
+                if not items or not result.get('next') or (passed_cutoff and newest_first):
                     break
-                offset += self.page_size
+                offset += len(items)
 
         return all_albums
 
@@ -435,8 +457,8 @@ class SpotifyReleaseService:
                     if self.cancelled:
                         break
                     try:
-                        result = self.safe_api_call(self.sp.search, q=f"{query} year:{years}", type='track',
-                                                    limit=self.page_size, offset=offset)
+                        result = self.fetch_page(self.sp.search, q=f"{query} year:{years}", type='track',
+                                                 offset=offset, limit=self.max_search_results - offset)
                         if not result or not result.get('tracks'):
                             break
                         
@@ -497,8 +519,8 @@ class SpotifyReleaseService:
                                     'track_signature': track_signature
                                 })
                         
-                        offset += self.page_size
-                        if len(tracks) < self.page_size:
+                        offset += len(tracks)
+                        if not result['tracks'].get('next'):
                             break
                     except Exception as e:
                         logger.warning(f"Error in collab search: {e}")

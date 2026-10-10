@@ -1,11 +1,15 @@
 """In-memory stand-in for the Spotify Web API routes wavvie uses.
 
 Mounted as a requests transport, so the real spotipy client and service code
-run unchanged. It follows the Development Mode contract Spotify documents
-after its February 2026 changes: search and artist-album pages accept at most
-10 items, album-track pages at most 50, playlists are created with
-POST /me/playlists, and items are added with POST /playlists/{id}/items in
-batches of at most 100. Any other route answers 404.
+run unchanged. By default it follows the Development Mode contract Spotify
+documents after its February 2026 changes: search and artist-album pages
+accept at most 10 items, album-track pages at most 50, playlists are created
+with POST /me/playlists, and items are added with POST /playlists/{id}/items
+in batches of at most 100. Any other route answers 404.
+
+Spotify does not enforce the documented page limit for every app (a live
+Development Mode app accepted 50 on 2026-10-10), so `page_limit` and
+`large_pages` ('reject' or 'clamp') can model each behaviour.
 """
 import json
 import re
@@ -58,6 +62,9 @@ class FakeSpotifyWebAPI(BaseAdapter):
         self.album_tracks = {}      # album id -> [simplified track, ...]
         self.search_tracks = []     # full track objects, in relevance order
         self.playlists = {}         # playlist id -> {'body': create body, 'items': [uri, ...]}
+        self.page_limit = 10        # largest search / artist-album page Spotify serves
+        self.large_pages = 'reject' # larger requests: 'reject' with 400, or 'clamp' silently
+        self.refused = 0
 
     def client(self):
         session = requests.Session()
@@ -96,7 +103,7 @@ class FakeSpotifyWebAPI(BaseAdapter):
             groups = self.artist_albums.get(parts[1], {})
             wanted = query.get('include_groups', ','.join(GROUP_ORDER)).split(',')
             items = [item for group in GROUP_ORDER if group in wanted for item in groups.get(group, [])]
-            return self.page(items, query, maximum=10, default=5)
+            return self.limited_page(items, query)
         if method == 'GET' and len(parts) == 3 and parts[0] == 'albums' and parts[2] == 'tracks':
             return self.page(self.album_tracks.get(parts[1], []), query, maximum=50, default=20)
         if method == 'POST' and parts == ['me', 'playlists']:
@@ -121,8 +128,16 @@ class FakeSpotifyWebAPI(BaseAdapter):
         if years:
             first, last = int(years.group(1)), int(years.group(2) or years.group(1))
             items = [item for item in items if first <= int(item['album']['release_date'][:4]) <= last]
-        status, payload = self.page(items, query, maximum=10, default=5)
+        status, payload = self.limited_page(items, query)
         return status, ({'tracks': payload} if status == 200 else payload)
+
+    def limited_page(self, items, query):
+        if int(query.get('limit', 5)) > self.page_limit:
+            if self.large_pages == 'reject':
+                self.refused += 1
+                return error(400, 'Invalid limit')
+            query = dict(query, limit=str(self.page_limit))
+        return self.page(items, query, maximum=self.page_limit, default=5)
 
     @staticmethod
     def page(items, query, maximum, default):

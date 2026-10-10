@@ -73,6 +73,14 @@ class TestSpotifyReleaseService(unittest.TestCase):
         self.assertEqual(sig1, sig2)
         self.assertEqual(sig1, "song a|artist x|artist y")
 
+    def test_track_signature_ignores_feature_notes_already_in_the_artist_list(self):
+        sign = self.service.create_track_signature
+        self.assertEqual(sign("Glow (feat. Kite)", ["Nova", "Kite"]), "glow|kite|nova")
+        self.assertEqual(sign("Glow (feat. Kite", ["Nova", "Kite"]), "glow|kite|nova")
+        self.assertEqual(sign("Glow [ft. Kite] (Night Mix)", ["Nova", "Kite"]), "glow (night mix)|kite|nova")
+        self.assertEqual(sign("Dancing (With Myself)", ["Nova"]), "dancing (with myself)|nova")
+        self.assertEqual(sign("Featherweight (Live)", ["Nova"]), "featherweight (live)|nova")
+
     def test_should_include_album_type(self):
         self.assertTrue(self.service.should_include_album_type("album"))
         self.assertTrue(self.service.should_include_album_type("single"))
