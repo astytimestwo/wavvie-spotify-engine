@@ -201,5 +201,6 @@ Live check on 2026-10-10 (Development Mode app, CLI): sign-in, 325 followed arti
 - Screen states and copy: `ui/pages/*`, with `tests/test_home_page.py`, `tests/test_pages.py` and `tests/test_settings_page.py`. The every-button test lists each state's buttons.
 - Configuration changes: `.env` loader + `save_environment` + SetupPage, or SettingsPage + `read_preferences` + `MainWindow.apply_preferences`.
 - Styling/packaging changes: `ui/theme.py` (role selectors and `[focusRing]`), `ui/widgets/controls.py`, resource helpers and Wavefeed.spec, which bundles `wavvie_wordmark.svg` for the logo. Existing tests assert Loubag/Agrandir fonts and nonnegative explicit letter spacing.
+- README images: `docs/media/make_media.py` renders the banner, GIFs and screenshots from the app, offscreen and with made-up demo data. Rerun it after visible UI changes.
 
 Keep this map current by recording behavior changes, affected relationships, new state/files, resolved findings, and the latest validation result. Do not treat an unchecked hypothesis as a confirmed defect or a design prompt as implemented code.

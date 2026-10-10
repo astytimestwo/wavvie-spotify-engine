@@ -1,109 +1,118 @@
-# wavvie
+<p align="center">
+  <img src="docs/media/banner.png" width="800" alt="wavvie: new music from the artists you follow, saved to a private Spotify playlist">
+</p>
 
-wavvie is a desktop and CLI tool for discovering new Spotify releases from followed artists, filtering out noisy compilations, and optionally exporting JSON or creating a private Spotify playlist.
+<p align="center">
+  <img alt="Desktop app: Windows" src="https://img.shields.io/badge/desktop-Windows-163338?style=flat-square">
+  <img alt="Command line: Windows, macOS, Linux" src="https://img.shields.io/badge/CLI-Windows%20%7C%20macOS%20%7C%20Linux-163338?style=flat-square">
+  <img alt="Built with PySide6" src="https://img.shields.io/badge/built%20with-PySide6-1D4047?style=flat-square">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-F7C873?style=flat-square&labelColor=163338"></a>
+</p>
 
-## Features
+**wavvie checks every artist you follow on Spotify for new releases and saves the songs to a private playlist.** No algorithm picks for you: one button looks at everything released since your last check, and wavvie remembers where it left off.
 
-- **Desktop helper**: a one-window PySide6 app. One button checks the artists you follow for songs released since your last check and saves them to a new, dated private playlist.
-- **Multi-threaded discovery**: Processes followed artists concurrently.
-- **Collaboration-aware scanning**: Finds featured/remix/with credits while filtering ghost credits.
-- **Smart filtering**: Skips greatest-hits collections, workout mixes, and low-quality compilations.
-- **Private playlists**: Creates private Spotify playlists in API-safe batches.
-- **Local credentials**: Reads Spotify credentials from `.env`; secrets are not committed.
+<p align="center">
+  <img src="docs/media/check.gif" alt="Pressing Check: wavvie checks 248 followed artists while a wave fills, then lists the 9 new songs it saved to a playlist named after the dates">
+</p>
 
-## Platform Support
+## How it works
 
-- **Windows desktop app**: Supported through the packaged `wavvie.exe` build.
-- **Windows CLI**: Supported through `run.bat` or direct Python commands.
-- **macOS and Linux CLI**: Supported from source with Python. Install the dependencies, create a `.env`, then run `python main.py`.
+1. **Connect once.** The first run walks you through creating your own Spotify app, then writes the `.env` file for you.
+2. **Press Check.** wavvie goes through every artist you follow, looking for albums, singles and EPs released since your last check, plus songs they appear on as a guest.
+3. **Get a playlist.** New songs go straight into a private playlist named after the dates, like *wavvie · New releases 3 Oct – 10 Oct*.
+4. **Come back whenever.** The next check starts where the last one ended. It skips songs it already saved, and if a check couldn't finish, it covers those days again.
 
-## Setup
+## What it finds
 
-1. **Spotify API Setup**:
-   - Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
-   - Create an app to get your `Client ID` and `Client Secret`.
-   - Set the Redirect URI to `http://127.0.0.1:8888/callback`.
-   - New Spotify apps run in Development Mode. Since February 2026 the app owner needs Spotify Premium and at most five users can use the app. Spotify also documents a maximum of 10 search results or artist albums per page for these apps; wavvie asks for 50 and switches to 10 if Spotify refuses.
+- **Releases and features.** Albums, singles and EPs, plus tracks where a followed artist is credited as a guest (feat., with, remix).
+- **No filler.** Greatest-hits and best-of collections, workout mixes and chart compilations are skipped, and so are credits where the artist isn't actually on the track.
+- **One copy of each song.** When a song is on both a single and an album, wavvie keeps one version.
 
-2. **Environment Variables**:
-   - Copy `.env.example` to `.env`.
-   - Fill in your `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, and `SPOTIPY_REDIRECT_URI`.
-   - Or start the desktop app: its first run asks for the Client ID and secret and writes `.env` for you.
+## The desktop app
 
-3. **Install Dependencies**:
+<table>
+  <tr>
+    <td><img src="docs/media/done.png" width="420" alt="Nine new songs saved, each with artwork, artists and release date"></td>
+    <td><img src="docs/media/settings.png" width="420" alt="Settings: the Spotify account, how far the first check looks back, and advanced options"></td>
+  </tr>
+</table>
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+- **One button.** A wave fills while every artist is checked. Stop ends a check without saving anything.
+- **Earlier checks.** Your recent checks are listed, each linking to its playlist.
+- **Change dates.** Pick a different start for a single check.
+- **Settings.** Your account and how far the first check looks back (7, 30, 90 or 180 days). Advanced options cover checking only some artists, parallel checks, a JSON copy of each check, reduced motion, refreshing your artist list and the activity log.
+- **Keyboard friendly.** Tab moves between controls. Ctrl+, opens Settings, Esc closes it and Ctrl+L shows the activity log.
 
-## Usage
+## Get started
 
-### Desktop App
+### 1. Create a Spotify app
 
-Windows packaged app:
+1. Open the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and create an app.
+2. Add this redirect URI to it: `http://127.0.0.1:8888/callback`
+3. Keep its Client ID and Client secret handy.
 
-Download `wavvie.exe` from the latest GitHub Release when available.
+New Spotify apps run in Development Mode: the app's owner needs Spotify Premium, and at most five people can use it.
 
-Run from source:
+### 2. Install
+
+You need Python and pip. wavvie is developed and tested with Python 3.14.
+
+```bash
+git clone https://github.com/astytimestwo/wavvie-spotify-engine.git
+cd wavvie-spotify-engine
+pip install -r requirements.txt
+```
+
+### 3. Run the desktop app
 
 ```bash
 python app.py
 ```
 
-Build a Windows executable:
+The first run asks for your Client ID and secret and saves them to `.env`. **Connect Spotify** then opens your browser so you can approve the app.
+
+<p align="center">
+  <img src="docs/media/setup.gif" alt="First run: pasting the Client ID and secret, approving wavvie in the browser, then the home screen">
+</p>
+
+The desktop app is tested on Windows. It's plain PySide6, so it may run on macOS and Linux too, but that isn't tested.
+
+There's no published release yet. To build a Windows executable yourself:
 
 ```bash
 python -m PyInstaller --clean --noconfirm Wavefeed.spec
 ```
 
-The built app appears at `dist/wavvie.exe`. Treat `dist/` as a local build output, not source code for commits.
+The app appears at `dist/wavvie.exe`.
 
-### CLI / Automator
+## Command line
 
-Cross-platform CLI:
+The same engine runs in a terminal on Windows, macOS and Linux. Copy `.env.example` to `.env` and fill in `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET` and `SPOTIPY_REDIRECT_URI`, or let the desktop app write it.
 
 ```bash
 python main.py --start 1 --end 50 --cutoff 2026-06-01
 ```
 
-This works on Windows, macOS, and Linux after installing `requirements.txt` and creating a local `.env` file.
+| Option | What it does | Default |
+| --- | --- | --- |
+| `--start` | First followed artist to check, counting alphabetically from 1 | 1 |
+| `--end` | Last followed artist to check | all |
+| `--cutoff` | Only include songs released on or after this date (YYYY-MM-DD) | 30 days ago |
+| `--refresh` | Fetch your followed artists again instead of using the cached list | off |
+| `--verbose` | Log in detail | off |
 
-Windows helper:
+A run that finds new songs writes a JSON tracklist and creates a private playlist. On Windows, double-click `run.bat` to be asked for the same options.
 
-Double-click **`run.bat`**. This will:
-- Help you set up your `.env` file if it's missing.
-- Ask for your start/end range and cutoff date.
-- Run the script automatically.
+## Privacy
 
-### Arguments
+- Your Client ID and secret stay in `.env` on your computer, and your sign-in in `.spotifycache`. Both are gitignored.
+- wavvie only talks to Spotify, and the playlists it creates are private.
 
-- `--start`: Start index of your followed artists (default: 1).
-- `--end`: End index of your followed artists (default: all).
-- `--cutoff`: Only include tracks released on or after this date (YYYY-MM-DD, default: 30 days ago).
-- `--refresh`: Refresh the local followed-artist cache.
-- `--verbose`: Enable detailed logging.
+## Spotify's Development Mode limits
 
-## Repository Hygiene
+Spotify documents at most 10 search results or artist albums per page for Development Mode apps. wavvie asks for 50 and drops to 10 if Spotify refuses, so it works either way; a large library just takes longer to check.
 
-Do not commit `.env`, `.spotifycache`, `followed_artists_cache.json`, `tracklist_*.json`, `build/`, `dist/`, or `__pycache__/`.
-
-## Desktop behavior
-
-- The first run walks you through connecting a Spotify app: open the dashboard, copy the redirect URI, then paste the Client ID and secret. wavvie writes `.env` for you.
-- One button checks every artist you follow and saves new songs to a private playlist named after the dates it covered, such as "wavvie · New releases 10 Oct – 17 Oct".
-- wavvie remembers each check. The next check starts on the day the last one ran, skips songs it already saved, and goes back over dates a check couldn't finish. "Change dates" picks a different start for one check.
-- Only one Spotify operation runs at a time. Stop ends a check without saving. Closing the window waits for current requests and releases a pending browser sign-in.
-- Settings has your account, how far the first check looks back, and advanced options:
-  - check only some artists;
-  - parallel checks;
-  - a JSON copy of each check;
-  - reduced motion;
-  - refresh your artist list;
-  - the activity log (Ctrl+L).
-
-  Ctrl+, opens Settings and Esc closes it.
-
-## Development checks
+## Development
 
 ```bash
 python -m unittest discover -s tests -v
@@ -111,16 +120,20 @@ python -m compileall -q app.py main.py core ui tests
 git diff --check
 ```
 
-The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary INI preferences, and mocked Spotify responses. It drives the real window through every state, clicks every visible button and checks its effect, tabs through the controls, and checks layouts at 720×560, 900×680 and 1600×1000, including that the header stays over the content column. No account credentials or real playlists are needed. Temporary-file creation and cleanup must be permitted by the execution environment.
+The tests need no Spotify account. The desktop suite drives the real window offscreen against an in-memory fake of the Spotify Web API: it walks every state, clicks every visible button, tabs through the controls and checks layouts from 720×560 to 1600×1000. Service tests run the real spotipy client against the same fake.
 
-Service tests run the real spotipy client against `tests/fake_spotify.py`, an in-memory transport for the Development Mode playlist routes that can refuse, silently cap or accept 50-item pages. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
+The images in this README are rendered from the app with made-up data:
 
-Validation on 2026-10-10: **126 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. Every window state was also rendered at 900×680 and 720×560 and reviewed by eye, and keyboard focus was checked by tabbing through Home and Settings on the native Windows platform.
+```bash
+python docs/media/make_media.py
+```
 
-Live check on 2026-10-10 with a Development Mode app and the CLI: sign-in, 325 followed artists, a five-artist scan (5 tracks in 22 seconds, 50-item pages accepted), JSON export and one private playlist (5 tracks) all worked. The desktop window and the packaged executable were not run against Spotify; they share the same service code.
+[mindmap.md](mindmap.md) maps the implementation: modules, data flow, Spotify API constraints, state and the latest validation runs.
 
-See [mindmap.md](mindmap.md) for the implementation map, data flow, Spotify API constraints, and remaining integration boundaries.
+## Repository hygiene
+
+Don't commit `.env`, `.spotifycache`, `followed_artists_cache.json`, `tracklist_*.json`, `build/`, `dist/` or `__pycache__/`.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+MIT. See [LICENSE](LICENSE).
