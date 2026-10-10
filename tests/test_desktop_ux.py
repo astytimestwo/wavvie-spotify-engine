@@ -246,7 +246,16 @@ class DesktopUXTests(unittest.TestCase):
             window.on_scan_completed(ScanResult(tracks=[track()], total_artists=5, end_index=5))
         playlist.assert_not_called()
         self.assertIn('warnings', window.notice_text.text())
+        self.assertIn('playlist creation was skipped', window.notice_text.text())
         self.assertEqual(window.results_page.selected_tracks(), [track()])
+
+    def test_warnings_without_automatic_playlist_do_not_report_it_skipped(self):
+        window = self.window
+        window.active_scan_config = ScanConfiguration(export_json=False, create_playlist_auto=False)
+        window.scan_warnings = ['One artist failed']
+        window.on_scan_completed(ScanResult(tracks=[track()], total_artists=5, end_index=5))
+        self.assertIn('warnings', window.notice_text.text())
+        self.assertNotIn('skipped', window.notice_text.text())
 
     def test_playlist_metadata_and_range_belong_to_displayed_results(self):
         window = self.window

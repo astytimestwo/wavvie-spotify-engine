@@ -575,18 +575,19 @@ class MainWindow(QMainWindow):
         self.dashboard_page.load_dashboard_settings()
         self.dashboard_page.show_scan_complete(result)
         self.set_operation(None)
-        if self.scan_warnings:
-            self.show_toast(f"Scan finished with {len(self.scan_warnings)} warnings. Results may be incomplete; review Activity before creating a playlist.", "warning")
-        elif not result.tracks:
-            self.show_toast("No releases found. Try an earlier date or a wider artist range.")
 
         config = getattr(self, "active_scan_config", None)
+        auto_playlist = bool(result.tracks and config and config.create_playlist_auto)
         if result.tracks and config and config.export_json and not self.closing:
             self.export_json(result.tracks)
-        if result.tracks and config and config.create_playlist_auto and not self.scan_warnings:
+        if auto_playlist and not self.scan_warnings:
             self.create_playlist(result.tracks)
         if self.scan_warnings:
-            self.show_toast(f"Scan finished with {len(self.scan_warnings)} warnings. Review Activity; automatic playlist creation was skipped.", "warning")
+            skipped = " Automatic playlist creation was skipped." if auto_playlist else ""
+            self.show_toast(f"Scan finished with {len(self.scan_warnings)} warnings. Results may be incomplete; "
+                            f"review Activity before creating a playlist.{skipped}", "warning")
+        elif not result.tracks:
+            self.show_toast("No releases found. Try an earlier date or a wider artist range.")
 
     @Slot(str)
     def on_scan_error(self, err_msg):
