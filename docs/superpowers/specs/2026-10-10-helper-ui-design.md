@@ -29,7 +29,7 @@ Success:
 One window with a slim header and a single content column. There is no sidebar.
 
 ### Header
-The wordmark sits on the left. On the right are the account avatar (Spotify image or initial, with the name in its tooltip) and a settings button (gear, accessible name "Settings"). The header is hidden on the setup and sign-in screens.
+The wordmark sits on the left. On the right are the account avatar (Spotify image or initial, with the name in its tooltip) and a quiet **Settings** text button. Text was chosen over a gear icon because it's clearer and needs no extra asset. The header is hidden on the setup and sign-in screens.
 
 ### Setup (no credentials found)
 Headline: "Connect wavvie to Spotify". Three numbered steps, a true sequence:
@@ -57,18 +57,18 @@ One state-driven area. Below it, "Earlier checks" lists the last five checks, bu
 | First run | "Let's find your new music" | "wavvie will check the {n} artists you follow and save anything released in the last {d} days to a private playlist." | **Check the last {d} days**, quiet Change dates |
 | Ready | "New music since {start}" | "Your last check covered {a} – {b} and saved {k} songs." (or "…and found nothing new.") | **Check {start} – today**, quiet Change dates |
 | Up to date (newest check is complete and ran today) | "You're up to date" | "Your last check ran today and saved {k} songs." | **Check again**, quiet Change dates |
-| Finish last check (last check incomplete) | "Let's finish your last check" | "Some artists couldn't be checked last time, so wavvie will look at {start} – today again and skip songs it already saved." | **Check {start} – today**, quiet Change dates |
+| Finish last check (last check incomplete) | "Let's finish your last check" | "Your last check didn't cover everything, so wavvie will look at {start} – today again and skip songs it already saved." (The cause can be failed artists, an artist range or a partly saved playlist.) | **Check {start} – today**, quiet Change dates |
 | Checking | "Checking your {n} artists…" | wave line; "{x} of {n} artists · {s} new songs so far"; when rate limited: "Spotify asked wavvie to slow down. Continuing in about {t} s." | quiet **Stop** (then "Stopping…", disabled) |
 | Saving | "Saving {k} songs to Spotify…" | none | none |
 | Done | "{k} new songs saved" (singular "1 new song saved") | "In your new playlist “{name}”."; optional coral note (see below); optional "A copy was saved to {file}." | **Open in Spotify**, quiet Done, quiet Show file (only if a JSON copy was saved; it opens the folder containing the file); song list |
 | Partly saved | "{added} of {k} songs saved" | coral: "Spotify stopped responding while adding songs. Open the playlist to check it; your next check will pick up the rest." | **Open in Spotify**, quiet Done; song list |
-| Nothing new | "Nothing new since {start}" | "No playlist was made. Check again in a few days." | quiet Done |
+| Nothing new | "Nothing new since {start}" | "No playlist was made. Check again in a few days."; optional coral notes | quiet Done |
 | Not saved (playlist creation failed) | "Your songs weren't saved" | "wavvie found {k} new songs, but Spotify didn't create the playlist. {error}" | **Try saving again**, quiet Done |
 | Stopped | "Check stopped" | "Nothing was saved." | quiet Done |
 | Failed | "That check didn't finish" | plain error | **Try again**, quiet Done |
 
 Coral notes on Done:
-- Some artists failed: "{m} artists couldn't be checked. Your next check will look at these dates again."
+- Some artists failed: "Some artists couldn't be checked. Your next check will look at these dates again." There is no count, because scan warnings don't map one-to-one to artists. The same note is shown on "Nothing new" when it applies.
 - Artist range set: "Only artists {x}–{y} were checked, so your next check will look at these dates again."
 
 Change dates reveals an inline row: "Check from [date picker] to today". The picker allows today or earlier. The primary label follows the picked date. A quiet **Use suggested dates** button reverts. The choice applies to the next check only.
@@ -154,7 +154,7 @@ Palette "low tide":
 | SEA | #8FE3B0 | small confirmations ("Copied") |
 
 Type:
-- Headlines are Loubag, 34 px (setup and sign-in 30 px).
+- Headlines are Loubag, 34 px, on every page.
 - Body text is Agrandir 15 px. Secondary text is 13 px and meta text is 12 px.
 - Buttons are Agrandir 15 px bold.
 - Everything is sentence case: no all-caps labels, no negative letter spacing.
