@@ -2,6 +2,7 @@
 import threading
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from core.models import ScanConfiguration, Track
 from core.spotify_service import SpotifyReleaseService
@@ -187,6 +188,27 @@ class SpotifyWebApiTests(unittest.TestCase):
         scan.join(5)
 
         self.assertFalse(scan.is_alive())
+        self.assertEqual(self.warnings, [])
+
+    def test_a_server_error_that_clears_on_retry_is_not_a_warning(self):
+        # The desktop marks a check unfinished when a warning arrives, so a recovered 5xx must not send one.
+        self.api.artist_albums['nova'] = {'single': [nova_single('glow', '2026-09-12')]}
+        self.api.album_tracks['glow'] = [track('glow1', 'Glow', [NOVA])]
+        self.service.get_and_cache_followed_artists = lambda refresh=False: [NOVA]
+        route, failed = self.api.route, []
+
+        def once_unavailable(method, path, query, body):
+            if path == '/artists/nova/albums' and not failed:
+                failed.append(path)
+                return 503, {'error': {'status': 503, 'message': 'Service unavailable'}}
+            return route(method, path, query, body)
+
+        self.api.route = once_unavailable
+        with patch('core.spotify_service.time.sleep'):
+            result = self.service.scan_releases(ScanConfiguration(cutoff_date_str='2026-09-01', worker_count=1))
+
+        self.assertEqual(failed, ['/artists/nova/albums'])
+        self.assertEqual([t.track_name for t in result.tracks], ['Glow'])
         self.assertEqual(self.warnings, [])
 
     def test_singles_with_four_or_more_tracks_are_labelled_ep(self):

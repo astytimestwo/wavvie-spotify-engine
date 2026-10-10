@@ -152,8 +152,8 @@ class SpotifyReleaseService:
                     if not retry_uncertain:
                         raise
                     wait_time = (2 ** attempt) * 2
+                    # Log only: a retry isn't a failure, and callers report one if every attempt fails.
                     logger.warning(f"Server error {e.http_status}. Retrying in {wait_time}s... (attempt {attempt + 1})")
-                    self.trigger_callback("warning", f"Spotify Server Error {e.http_status}. Retrying...")
                     time.sleep(wait_time)
                     continue
                 else:
