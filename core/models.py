@@ -66,6 +66,7 @@ class ScanResult:
     total_tracks: int = 0
     start_index: int = 1
     end_index: int = 9999
+    followed_artists: int = 0
 
 @dataclass
 class PlaylistResult:

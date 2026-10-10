@@ -674,7 +674,8 @@ class SpotifyReleaseService:
                 total_artists=len(artists_to_process),
                 total_tracks=len(all_tracks),
                 start_index=config.start_index,
-                end_index=actual_end
+                end_index=actual_end,
+                followed_artists=total_artists
             )
             
             self.trigger_callback("scan_completed", result)
@@ -726,7 +727,8 @@ class SpotifyReleaseService:
             self.trigger_callback("warning", f"Failed to export tracklist: {e}")
             return None
 
-    def create_playlist(self, tracks: List[Track], config: ScanConfiguration, start_index: int, end_index: int) -> Optional[PlaylistResult]:
+    def create_playlist(self, tracks: List[Track], config: ScanConfiguration, start_index: int, end_index: int,
+                        followed_artists: int = 0) -> Optional[PlaylistResult]:
         self.trigger_callback("playlist_started")
         if not tracks:
             self.trigger_callback("warning", "No tracks to add to playlist.")
@@ -739,7 +741,8 @@ class SpotifyReleaseService:
             self.trigger_callback("warning", "No valid tracks selected.")
             return None
         try:
-            range_suffix = f" (Artists {start_index}-{end_index})" if start_index != 1 or end_index != 9999 else ""
+            covers_all_artists = start_index == 1 and (end_index == 9999 or 0 < followed_artists <= end_index)
+            range_suffix = "" if covers_all_artists else f" (Artists {start_index}-{end_index})"
             playlist_name = config.playlist_name + range_suffix
             
             # POST /me/playlists; Spotify removed per-user playlist creation for Development Mode apps.

@@ -259,6 +259,7 @@ class TestSpotifyReleaseService(unittest.TestCase):
         self.assertEqual(result.start_index, 2)
         self.assertEqual(result.end_index, 3)
         self.assertEqual(result.total_artists, 2)
+        self.assertEqual(result.followed_artists, 3)
 
     def test_scan_completion_persists_actual_artist_range_for_exports(self):
         settings = QSettings("wavvie", "SpotifyPlaylistCreator")

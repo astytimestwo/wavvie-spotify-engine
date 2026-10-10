@@ -253,13 +253,13 @@ class DesktopUXTests(unittest.TestCase):
         config = ScanConfiguration(playlist_name='Custom mix', playlist_description='My description',
                                    export_json=False, create_playlist_auto=False)
         window.active_scan_config = config
-        window.on_scan_completed(ScanResult(tracks=[track()], start_index=2, end_index=4, total_artists=3))
+        window.on_scan_completed(ScanResult(tracks=[track()], start_index=2, end_index=4, total_artists=3, followed_artists=10))
         window.active_scan_config = ScanConfiguration(playlist_name='Another scan')
         with patch('ui.main_window.PlaylistWorker') as worker, patch.object(window.thread_pool, 'start'):
             window.create_playlist([track()])
         args = worker.call_args.args
         self.assertEqual(args[2].playlist_name, 'Custom mix')
-        self.assertEqual(args[3:], (2, 4))
+        self.assertEqual(args[3:], (2, 4, 10))
         window.on_playlist_created(PlaylistResult('Custom mix', 'p', 'https://open.spotify.com/playlist/p', 1))
         self.assertTrue(window.results_page.btn_create_pl.isEnabled())
         self.assertEqual(window.results_page.output_url, QUrl('https://open.spotify.com/playlist/p'))

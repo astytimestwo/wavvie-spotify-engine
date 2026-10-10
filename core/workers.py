@@ -99,13 +99,14 @@ class ScanWorker(QRunnable):
             self.signals.error.emit(str(error))
 
 class PlaylistWorker(QRunnable):
-    def __init__(self, service, tracks, config, start_idx, end_idx):
+    def __init__(self, service, tracks, config, start_idx, end_idx, followed_artists=0):
         super().__init__()
         self.service = service
         self.tracks = tracks
         self.config = config
         self.start_idx = start_idx
         self.end_idx = end_idx
+        self.followed_artists = followed_artists
         self.signals = WorkerSignals()
 
     def run(self):
@@ -113,7 +114,8 @@ class PlaylistWorker(QRunnable):
         self.signals.started.emit()
         try:
             with callbacks(self.service, {"playlist_batch_completed": self.signals.batch_completed.emit, "warning": errors.append}):
-                result = self.service.create_playlist(self.tracks, self.config, self.start_idx, self.end_idx)
+                result = self.service.create_playlist(self.tracks, self.config, self.start_idx, self.end_idx,
+                                                      self.followed_artists)
             if result is not None:
                 self.signals.finished.emit(result)
             else:

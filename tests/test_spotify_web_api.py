@@ -116,6 +116,16 @@ class SpotifyWebApiTests(unittest.TestCase):
 
         self.assertEqual([t['album_type'] for t in collaborations], ['ep'])
 
+    def test_playlist_name_mentions_the_artist_range_only_for_partial_scans(self):
+        song = Track('t1', 'Song', 'Album', 'a', 'single', '2026-09-01', 'Nova', 'nova',
+                     False, 'main', ['Nova'], 'song|nova')
+        cases = [((1, 5), 'New Releases'), ((2, 5), 'New Releases (Artists 2-5)'),
+                 ((1, 3), 'New Releases (Artists 1-3)')]
+        for (start, end), expected in cases:
+            with self.subTest(start=start, end=end):
+                result = self.service.create_playlist([song], ScanConfiguration(), start, end, followed_artists=5)
+                self.assertEqual(self.api.playlists[result.playlist_id]['body']['name'], expected)
+
     def test_create_playlist_adds_every_track_to_a_private_playlist(self):
         tracks = [Track(f't{n}', f'Song {n}', 'Album', 'a', 'single', '2026-09-01', 'Nova', 'nova',
                         False, 'main', ['Nova'], f'song {n}|nova') for n in range(150)]

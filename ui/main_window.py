@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.image_requests = {}
         self.account_generation = 0
         self.results_range = (1, 9999)
+        self.results_followed = 0
         self.results_config = None
         self._workers = {}
         
@@ -257,6 +258,7 @@ class MainWindow(QMainWindow):
         self.dashboard_page.update_followed_artists_count(0)
         self.results_config = None
         self.results_range = (1, 9999)
+        self.results_followed = 0
         self.auth_page.set_connected(False)
         self.sidebar.update_user_profile("", None)
         self.dashboard_page.update_user_info("")
@@ -567,6 +569,7 @@ class MainWindow(QMainWindow):
         settings.setValue("last_scan_start_idx", actual_start)
         settings.setValue("last_scan_end_idx", actual_end)
         self.results_range = (actual_start, actual_end)
+        self.results_followed = result.followed_artists
         settings.setValue("last_scan_date", datetime.now().strftime("%Y-%m-%d %H:%M"))
         settings.setValue("last_scan_tracks", len(result.tracks))
         self.dashboard_page.load_dashboard_settings()
@@ -624,7 +627,7 @@ class MainWindow(QMainWindow):
         # Use first and last indices as ranges
         start_idx, end_idx = self.results_range
 
-        worker = PlaylistWorker(self.service, tracks, config, start_idx, end_idx)
+        worker = PlaylistWorker(self.service, tracks, config, start_idx, end_idx, self.results_followed)
         worker.signals.started.connect(lambda: self.show_toast("Creating Spotify playlist..."))
         worker.signals.finished.connect(self.on_playlist_created)
         worker.signals.error.connect(self.on_playlist_error)

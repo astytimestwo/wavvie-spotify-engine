@@ -151,14 +151,18 @@ def run_cli(start_index: int, end_index: int, cutoff_date_str: str, refresh_cach
     logger.info(f"Processing complete. Total unique tracks found: {scan_result.total_tracks}")
     if scan_result.duplicates_prevented > 0:
         logger.info(f"Duplicates prevented: {scan_result.duplicates_prevented}")
-        
+    if not scan_result.tracks:
+        logger.info(f"No new releases since {cutoff_date_str}. Nothing to export or add to a playlist.")
+        return
+
     # Export JSON
     actual_start = scan_result.start_index
     actual_end = scan_result.end_index
     json_path = service.dump_tracklist_to_json(scan_result.tracks, actual_start, actual_end)
-    
+
     # Create Playlist
-    playlist_result = service.create_playlist(scan_result.tracks, config, actual_start, actual_end)
+    playlist_result = service.create_playlist(scan_result.tracks, config, actual_start, actual_end,
+                                              scan_result.followed_artists)
     
     if playlist_result:
         if playlist_result.error:
