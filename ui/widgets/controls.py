@@ -32,10 +32,12 @@ def rule():
 def clear_layout(layout):
     while layout.count():
         item = layout.takeAt(0)
-        if item.widget() is not None:
-            item.widget().hide()
-            item.widget().setParent(None)
-            item.widget().deleteLater()
+        # Read the widget once: after reparenting, the layout item no longer refers to it.
+        widget = item.widget()
+        if widget is not None:
+            widget.hide()
+            widget.setParent(None)
+            widget.deleteLater()
         elif item.layout() is not None:
             clear_layout(item.layout())
 
