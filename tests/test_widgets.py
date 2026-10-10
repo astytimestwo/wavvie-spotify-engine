@@ -4,11 +4,14 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import logging
 import unittest
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 
 from ui.widgets.activity_log import ActivityLog, ActivityLogDialog
 from ui.widgets.avatar import Avatar
+from ui.widgets.focus_rings import FocusRings
 from ui.widgets.wave_line import WaveLine
 
 
@@ -61,6 +64,32 @@ class WidgetTests(unittest.TestCase):
         dialog.btn_copy.click()
         self.assertIn('message 4', QGuiApplication.clipboard().text())
         self.assertEqual(dialog.btn_copy.text(), 'Copied')
+
+    def test_focus_rings_follow_the_keyboard_and_not_the_mouse(self):
+        window = QWidget()
+        self.addCleanup(window.deleteLater)
+        layout = QVBoxLayout(window)
+        first, second = QPushButton('First'), QPushButton('Second')
+        layout.addWidget(first)
+        layout.addWidget(second)
+        FocusRings(window)
+        window.show()
+        window.activateWindow()
+        self.assertTrue(QTest.qWaitForWindowActive(window, 1000))
+
+        def ringed():
+            return [button.text() for button in (first, second) if button.property('focusRing')]
+
+        QTest.mouseClick(first, Qt.LeftButton)
+        self.assertEqual(ringed(), [])
+        first.hide()  # a clicked button that goes away hands focus on, still without a ring
+        self.assertIs(QApplication.focusWidget(), second)
+        self.assertEqual(ringed(), [])
+        first.show()
+        QTest.keyClick(second, Qt.Key_Tab)
+        self.assertEqual(ringed(), ['First'])
+        QTest.mouseClick(second, Qt.LeftButton)
+        self.assertEqual(ringed(), [])
 
     def test_detached_activity_log_stops_listening(self):
         log = ActivityLog()

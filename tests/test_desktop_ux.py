@@ -17,10 +17,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtCore import QBuffer, QDate, QIODevice, QSettings, Qt, QThread, QUrl
+from PySide6.QtCore import QBuffer, QDate, QIODevice, QPoint, QSettings, Qt, QThread, QUrl
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QAbstractButton, QApplication, QScrollArea
+from PySide6.QtWidgets import QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QScrollArea
 
 import main
 from core.history import CheckHistory, CheckRecord, playlist_name, short_date
@@ -30,6 +30,7 @@ from core.workers import AuthWorker, ScanWorker, ImageLoadWorker, LoadArtistsWor
 from fake_spotify import FakeSpotifyWebAPI, album, artist_ref, track as api_track
 from ui.font_loader import load_bundled_fonts
 from ui.main_window import MainWindow, PendingSave
+from ui.messages import keep_together
 
 NOVA = artist_ref('nova', 'Nova')
 KITE = artist_ref('kite', 'Kite')
@@ -308,10 +309,66 @@ class DesktopFlowTests(unittest.TestCase):
         home = self.sign_in()
         self.window.btn_settings.click()
         self.assertIs(self.window.stack.currentWidget(), self.window.settings_page)
+        self.assertFalse(self.window.btn_settings.isVisibleTo(self.window))  # the page has its own Done
         self.window.settings_page.combo_look_back.setCurrentIndex(0)
         self.window.settings_page.btn_done.click()
         self.assertIs(self.window.stack.currentWidget(), home)
+        self.assertTrue(self.window.btn_settings.isVisibleTo(self.window))
         self.assertEqual(home.btn_primary.text(), 'Check the last 7 days')
+
+    def test_the_header_lines_up_with_the_column_and_stays_put(self):
+        home = self.sign_in()
+        self.window.show()
+        for width, height in ((720, 560), (900, 680), (1600, 1000)):
+            self.window.resize(width, height)
+            self.window.show_page(home)
+            self.app.processEvents()
+            left = home.headline.mapTo(self.window, QPoint(0, 0)).x()
+            right = left + home.headline.width()
+            settings = self.window.btn_settings
+            where = f'{width}×{height}'
+            self.assertEqual(self.window.wordmark.mapTo(self.window, QPoint(0, 0)).x(), left, where)
+            self.assertEqual(settings.mapTo(self.window, QPoint(settings.width(), 0)).x(), right, where)
+            avatar = self.window.avatar.mapTo(self.window, QPoint(0, 0))
+            self.window.show_page(self.window.settings_page)
+            self.app.processEvents()
+            self.assertEqual(self.window.avatar.mapTo(self.window, QPoint(0, 0)), avatar, where)
+
+    def test_the_header_follows_the_column_when_the_page_scrolls(self):
+        home = self.sign_in()
+        self.window.show()
+        self.window.resize(720, 560)
+        songs = [track(number) for number in range(30)]
+        for listed, scrolls in ((songs, True), (songs[:1], False)):
+            home.show_done('wavvie', 'https://open.spotify.com/playlist/p', listed)
+            self.app.processEvents()
+            self.assertEqual(home.scroll.verticalScrollBar().isVisible(), scrolls)
+            self.assertEqual(self.window.wordmark.mapTo(self.window, QPoint(0, 0)).x(),
+                             home.headline.mapTo(self.window, QPoint(0, 0)).x(), f'{len(listed)} songs')
+
+    def test_tab_only_stops_on_controls(self):
+        home = self.sign_in()
+        self.window.history = CheckHistory([CheckRecord(days_ago(9), days_ago(2), 'x', songs=3, playlist_name='wavvie',
+                                                        playlist_url='https://open.spotify.com/playlist/p1')])
+        self.window.show_home_ready()
+        self.window.show()
+        self.window.activateWindow()
+        self.assertTrue(QTest.qWaitForWindowActive(self.window, 1000))
+        for page in (home, self.window.settings_page):
+            self.window.show_page(page)
+            for _ in range(10):
+                QTest.keyClick(self.app.focusWidget() or self.window, Qt.Key_Tab)
+                focused = self.app.focusWidget()
+                with self.subTest(page=type(page).__name__, stop=type(focused).__name__):
+                    self.assertIsInstance(focused, (QAbstractButton, QComboBox, QAbstractSpinBox))
+
+    def test_a_failed_sign_in_keeps_the_redirect_uri_on_one_line(self):
+        self.window.on_auth_error('boom')
+        message = self.window.sign_in_page.message.text()
+        self.assertIn(keep_together(self.window.service.redirect_uri), message)
+        self.assertEqual(message.replace('⁠', ''),
+                         f"Couldn't connect to Spotify. Check that your app's redirect URI is "
+                         f"{self.window.service.redirect_uri}, then try again.")
 
     def test_reduced_motion_keeps_the_wave_still(self):
         self.settings.setValue('reduced_motion', True)
@@ -519,8 +576,7 @@ class DesktopFlowTests(unittest.TestCase):
         def operation(name):
             return lambda: self.assertEqual(window.operation, name)
 
-        settings_buttons = {'openSettings': page(settings), 'closeSettings': page(home),
-                            'disconnect': page(window.sign_in_page)}
+        settings_buttons = {'closeSettings': page(home), 'disconnect': page(window.sign_in_page)}
         scenarios = [
             ('ready', at_home(window.show_home_ready), lambda: window, {
                 'openSettings': page(settings), 'primaryAction': operation('scan'),

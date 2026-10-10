@@ -4,7 +4,7 @@ wavvie is a desktop and CLI tool for discovering new Spotify releases from follo
 
 ## Features
 
-- **Desktop dashboard**: PySide6 app with live scan progress, release pulse visualization, results, activity, and settings.
+- **Desktop helper**: a one-window PySide6 app. One button checks the artists you follow for songs released since your last check and saves them to a new, dated private playlist.
 - **Multi-threaded discovery**: Processes followed artists concurrently.
 - **Collaboration-aware scanning**: Finds featured/remix/with credits while filtering ghost credits.
 - **Smart filtering**: Skips greatest-hits collections, workout mixes, and low-quality compilations.
@@ -28,6 +28,7 @@ wavvie is a desktop and CLI tool for discovering new Spotify releases from follo
 2. **Environment Variables**:
    - Copy `.env.example` to `.env`.
    - Fill in your `SPOTIPY_CLIENT_ID`, `SPOTIPY_CLIENT_SECRET`, and `SPOTIPY_REDIRECT_URI`.
+   - Or start the desktop app: its first run asks for the Client ID and secret and writes `.env` for you.
 
 3. **Install Dependencies**:
 
@@ -88,13 +89,19 @@ Do not commit `.env`, `.spotifycache`, `followed_artists_cache.json`, `tracklist
 
 ## Desktop behavior
 
-- Quick Scan uses your saved date and output preferences for all followed artists. Custom scans let you choose an alphabetical artist range.
-- Only one Spotify operation runs at a time. You can navigate while scanning; cancellation waits for current requests to finish.
-- While connecting, **Cancel sign-in** stops waiting for the browser (for example after closing the tab or seeing a redirect URI error). Closing the window does the same.
-- Results explain empty scans and unmatched searches. Selection counts, export, and playlist creation use checked tracks visible under the current filters.
-- Manual export opens a save dialog. Completed exports and playlists have persistent links on Results. Partial playlist failures show the confirmed count and a link to check Spotify before retrying.
-- Settings save automatically, and reduced motion disables the release animation and rotating tips. Ctrl+F opens Results search; Ctrl+L opens Activity.
-- Large result sets load in small batches. Artwork loads for visible rows, keeping background work and image caches bounded.
+- The first run walks you through connecting a Spotify app: open the dashboard, copy the redirect URI, then paste the Client ID and secret. wavvie writes `.env` for you.
+- One button checks every artist you follow and saves new songs to a private playlist named after the dates it covered, such as "wavvie · New releases 10 Oct – 17 Oct".
+- wavvie remembers each check. The next check starts on the day the last one ran, skips songs it already saved, and goes back over dates a check couldn't finish. "Change dates" picks a different start for one check.
+- Only one Spotify operation runs at a time. Stop ends a check without saving. Closing the window waits for current requests and releases a pending browser sign-in.
+- Settings has your account, how far the first check looks back, and advanced options:
+  - check only some artists;
+  - parallel checks;
+  - a JSON copy of each check;
+  - reduced motion;
+  - refresh your artist list;
+  - the activity log (Ctrl+L).
+
+  Ctrl+, opens Settings and Esc closes it.
 
 ## Development checks
 
@@ -104,11 +111,11 @@ python -m compileall -q app.py main.py core ui tests
 git diff --check
 ```
 
-The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary INI preferences, and mocked Spotify responses. It covers real widget interactions, worker completion, cancellation, shutdown, settings, outputs, long text, large results, and layouts at 1000×640, 1280×820, and 1600×1000. No account credentials or real playlists are needed. Temporary-file creation and cleanup must be permitted by the execution environment.
+The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary INI preferences, and mocked Spotify responses. It drives the real window through every state, clicks every visible button and checks its effect, tabs through the controls, and checks layouts at 720×560, 900×680 and 1600×1000, including that the header stays over the content column. No account credentials or real playlists are needed. Temporary-file creation and cleanup must be permitted by the execution environment.
 
 Service tests run the real spotipy client against `tests/fake_spotify.py`, an in-memory transport for the Development Mode playlist routes that can refuse, silently cap or accept 50-item pages. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
 
-Validation on 2026-10-10: **77 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. The 1,000-track check showed its first 50 rows in 0.18–0.46 seconds and finished loading in 3.6–7.6 seconds; that test's 8-second limit can be exceeded when the machine is busy. Most of that time is spent building row widgets.
+Validation on 2026-10-10: **118 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. Every window state was also rendered at 900×680 and 720×560 and reviewed by eye, and keyboard focus was checked by tabbing through Home and Settings on the native Windows platform.
 
 Live check on 2026-10-10 with a Development Mode app and the CLI: sign-in, 325 followed artists, a five-artist scan (5 tracks in 22 seconds, 50-item pages accepted), JSON export and one private playlist (5 tracks) all worked. The desktop window and the packaged executable were not run against Spotify; they share the same service code.
 

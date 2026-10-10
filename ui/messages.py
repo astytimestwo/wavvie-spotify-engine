@@ -17,3 +17,8 @@ def friendly_error(message, fallback=True):
     if not fallback:
         return None
     return f"Spotify reported a problem: {text[:200]}" if text else "Something went wrong. Try again."
+
+
+def keep_together(address):
+    """Stop a URL from wrapping onto two lines by putting a word joiner after each slash."""
+    return address.replace("/", "/\u2060")

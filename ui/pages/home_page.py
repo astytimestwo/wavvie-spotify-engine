@@ -4,11 +4,12 @@ from datetime import date
 from typing import List, Optional
 
 from PySide6.QtCore import QDate, QPoint, QRect, QSignalBlocker, Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QDateEdit, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QPixmap, QTextCharFormat
+from PySide6.QtWidgets import QDateEdit, QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from core.history import CheckRecord, NextWindow, release_label, short_date, window_label
 from core.models import Track
+from ui.theme import Theme
 from ui.widgets.controls import button, clear_layout, label, rule, scroll_column
 from ui.widgets.elided_label import ElidedLabel
 from ui.widgets.wave_line import WaveLine
@@ -73,21 +74,6 @@ class SongRow(QFrame):
             super().keyPressEvent(event)
 
 
-class HistoryRow(QWidget):
-    open_requested = Signal(str)
-
-    def __init__(self, record: CheckRecord, parent=None):
-        super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.addWidget(label(window_label(record.start_date, record.end_date), wrap=False), 1)
-        layout.addWidget(label(plural(record.songs, 'song') if record.songs else "Nothing new", "secondary", wrap=False))
-        if record.playlist_url:
-            self.btn_open = button("Open in Spotify", "quiet", "openHistoryPlaylist")
-            self.btn_open.clicked.connect(lambda: self.open_requested.emit(record.playlist_url))
-            layout.addWidget(self.btn_open)
-
-
 class HomePage(QWidget):
     check_requested = Signal(object)
     stop_requested = Signal()
@@ -127,15 +113,20 @@ class HomePage(QWidget):
         self.date_start.setCalendarPopup(True)
         self.date_start.setDisplayFormat("d MMM yyyy")
         self.date_start.setAccessibleName("First day to check")
+        # Qt paints weekends red; keep every day in the palette.
+        for day in (Qt.Saturday, Qt.Sunday):
+            self.date_start.calendarWidget().setWeekdayTextFormat(day, QTextCharFormat())
         self.lbl_from.setBuddy(self.date_start)
         self.btn_reset_dates = button("Use suggested dates", "quiet", "useSuggestedDates")
-        for widget in (self.lbl_from, self.date_start, label("to today", wrap=False), self.btn_reset_dates):
+        for widget in (self.lbl_from, self.date_start, label("to today", wrap=False)):
             dates.addWidget(widget)
+        dates.addSpacing(8)
+        dates.addWidget(self.btn_reset_dates)
         dates.addStretch()
         layout.addWidget(self.dates_row)
 
         actions = QHBoxLayout()
-        actions.setSpacing(16)
+        actions.setSpacing(24)
         self.btn_primary = button("", "primary", "primaryAction")
         self.btn_quiet = button("", "quiet", "quietAction")
         self.btn_extra = button("", "quiet", "extraAction")
@@ -231,9 +222,20 @@ class HomePage(QWidget):
                         quiet=("Change dates", self.open_dates))
         today = date.today()
         self.date_start.setMaximumDate(QDate(today.year, today.month, today.day))
+        self.grey_out_future_days(today)
         self.set_start(window.start)
         self.update_check_label()
         self.show_history(history[:5])
+
+    def grey_out_future_days(self, today):
+        """The picker refuses days after today, but Qt draws them like any other day."""
+        calendar = self.date_start.calendarWidget()
+        calendar.setDateTextFormat(QDate(), QTextCharFormat())  # a null date clears every format
+        future = QTextCharFormat()
+        future.setForeground(QColor(Theme.DIM))
+        first = QDate(today.year, today.month, today.day)
+        for offset in range(1, 43):  # the calendar shows at most six weeks
+            calendar.setDateTextFormat(first.addDays(offset), future)
 
     def set_start(self, day):
         blocker = QSignalBlocker(self.date_start)
@@ -340,7 +342,9 @@ class HomePage(QWidget):
                         quiet=("Done", self.done_requested.emit))
 
     def show_songs(self, tracks):
-        for track in tracks:
+        for index, track in enumerate(tracks):
+            if index:
+                self.songs_layout.addWidget(rule())
             row = SongRow(track)
             row.activated.connect(self.open_url_requested.emit)
             self.songs_layout.addWidget(row)
@@ -349,15 +353,30 @@ class HomePage(QWidget):
         self.requested_artwork = set()
         QTimer.singleShot(0, self, self.request_visible_artwork)
 
-    def show_history(self, records):
+    def show_history(self, records: List[CheckRecord]):
         if not records:
             return
         self.history_layout.addWidget(rule())
         self.history_layout.addWidget(label("Earlier checks", "section"))
-        for record in records:
-            row = HistoryRow(record)
-            row.open_requested.connect(self.open_url_requested.emit)
-            self.history_layout.addWidget(row)
+        # One grid for every row, so song counts and "Nothing new" share a column.
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(4)
+        grid.setColumnStretch(0, 1)
+        for index, record in enumerate(records):
+            row = index * 2
+            if index:
+                grid.addWidget(rule(), row - 1, 0, 1, 3)
+            grid.addWidget(label(window_label(record.start_date, record.end_date), "cell", wrap=False), row, 0)
+            count = plural(record.songs, 'song') if record.songs else "Nothing new"
+            grid.addWidget(label(count, "secondary", wrap=False), row, 1, Qt.AlignRight)
+            if record.playlist_url:
+                open_playlist = button("Open in Spotify", "quiet", "openHistoryPlaylist")
+                open_playlist.clicked.connect(
+                    lambda checked=False, url=record.playlist_url: self.open_url_requested.emit(url))
+                grid.addWidget(open_playlist, row, 2)
+        self.history_layout.addLayout(grid)
         self.history_box.show()
 
     def request_visible_artwork(self):

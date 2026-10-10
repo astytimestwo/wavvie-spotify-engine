@@ -26,6 +26,7 @@ class SetupPage(QWidget):
 
         layout.addWidget(label("2. Add this redirect URI to the app:"))
         uri_row = QHBoxLayout()
+        uri_row.setSpacing(16)
         self.lbl_uri = label(redirect_uri, "code", wrap=False, selectable=True)
         self.btn_copy = button("Copy", "quiet", "copyRedirect")
         uri_row.addWidget(self.lbl_uri)

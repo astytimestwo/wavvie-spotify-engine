@@ -69,6 +69,11 @@ class SignInPageTests(unittest.TestCase):
         self.assertEqual(page.message.text(), "Couldn't connect to Spotify.")
         self.assertFalse(page.message.isHidden())
 
+    def test_the_headline_never_leaves_one_word_on_its_own_line(self):
+        page = SignInPage()
+        self.addCleanup(page.deleteLater)
+        self.assertEqual(page.headline.text(), 'New music from the artists you follow')
+
 
 if __name__ == '__main__':
     unittest.main()

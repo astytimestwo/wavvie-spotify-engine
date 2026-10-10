@@ -57,6 +57,7 @@ class ActivityLogDialog(QDialog):
         self.view.setAccessibleName("Activity log")
         layout.addWidget(self.view, 1)
         actions = QHBoxLayout()
+        actions.setSpacing(24)
         actions.addStretch()
         self.btn_copy = button("Copy log", "quiet", "copyLog")
         self.btn_close = button("Close", "primary", "closeLog")

@@ -3,7 +3,8 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from PySide6.QtCore import QSettings, QSignalBlocker, Qt, Signal
-from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QSpinBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QSpinBox, QStyledItemDelegate, QVBoxLayout,
+                               QWidget)
 
 from ui.widgets.controls import button, label, rule, scroll_column
 
@@ -42,6 +43,7 @@ class SettingsPage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.artist_count = 0
         self.scroll, layout = scroll_column(self, top=20)
         top = QHBoxLayout()
         top.addWidget(label("Settings", "headline"), 1)
@@ -64,6 +66,8 @@ class SettingsPage(QWidget):
         self.combo_look_back = QComboBox()
         self.combo_look_back.setObjectName("lookBack")
         self.combo_look_back.addItems([f"{days} days" for days in LOOK_BACK_DAYS])
+        # The native list adds Windows' blue accent; a styled delegate draws it from the stylesheet.
+        self.combo_look_back.setItemDelegate(QStyledItemDelegate(self.combo_look_back))
         caption.setBuddy(self.combo_look_back)
         look_back.addWidget(caption, 1)
         look_back.addWidget(self.combo_look_back)
@@ -79,6 +83,11 @@ class SettingsPage(QWidget):
         self.chk_range = QCheckBox("Only check some artists")
         self.chk_range.setObjectName("artistRange")
         advanced.addWidget(self.chk_range)
+        # The range's captions and hint dim along with its boxes while the checkbox is off.
+        self.range_box = QWidget()
+        range_layout = QVBoxLayout(self.range_box)
+        range_layout.setContentsMargins(0, 0, 0, 0)
+        range_layout.setSpacing(10)
         range_row = QHBoxLayout()
         self.spin_from = QSpinBox()
         self.spin_to = QSpinBox()
@@ -91,8 +100,9 @@ class SettingsPage(QWidget):
             range_row.addWidget(caption)
             range_row.addWidget(spin)
         range_row.addStretch()
-        advanced.addLayout(range_row)
-        advanced.addWidget(label("Artists are in alphabetical order. Both ends are included.", "secondary"))
+        range_layout.addLayout(range_row)
+        range_layout.addWidget(label("Artists are in alphabetical order. Both ends are included.", "secondary"))
+        advanced.addWidget(self.range_box)
         workers = QHBoxLayout()
         caption = label("Parallel checks", wrap=False)
         self.spin_workers = QSpinBox()
@@ -110,6 +120,7 @@ class SettingsPage(QWidget):
         advanced.addWidget(self.chk_json)
         advanced.addWidget(self.chk_motion)
         tools = QHBoxLayout()
+        tools.setSpacing(24)
         self.btn_refresh = button("Refresh artist list", "quiet", "refreshArtists")
         self.btn_log = button("View activity log", "quiet", "viewActivityLog")
         tools.addWidget(self.btn_refresh)
@@ -146,7 +157,7 @@ class SettingsPage(QWidget):
         self.combo_look_back.setCurrentIndex(LOOK_BACK_DAYS.index(preferences.look_back_days))
         self.chk_range.setChecked(preferences.artist_range is not None)
         self.spin_from.setValue(settings.value("artist_range_start", 1, type=int))
-        self.spin_to.setValue(settings.value("artist_range_end", 1, type=int))
+        self.spin_to.setValue(settings.value("artist_range_end", max(1, self.artist_count), type=int))
         self.spin_workers.setValue(preferences.workers)
         self.chk_json.setChecked(preferences.export_json)
         self.chk_motion.setChecked(preferences.reduced_motion)
@@ -173,8 +184,7 @@ class SettingsPage(QWidget):
         self.settings_changed.emit()
 
     def sync_range_controls(self):
-        for spin in (self.spin_from, self.spin_to):
-            spin.setEnabled(self.chk_range.isChecked())
+        self.range_box.setEnabled(self.chk_range.isChecked())
 
     def toggle_advanced(self):
         show = self.advanced.isHidden()
@@ -186,9 +196,15 @@ class SettingsPage(QWidget):
         self.btn_disconnect.setVisible(bool(name))
 
     def set_artist_count(self, count):
+        self.artist_count = count
         for spin in (self.spin_from, self.spin_to):
             blocker = QSignalBlocker(spin)
             spin.setMaximum(max(1, count))
+            del blocker
+        if not QSettings("wavvie", "SpotifyPlaylistCreator").contains("artist_range_end"):
+            # Until a range is saved it covers every artist, so ticking the box narrows from all of them.
+            blocker = QSignalBlocker(self.spin_to)
+            self.spin_to.setValue(max(1, count))
             del blocker
 
     def set_busy(self, busy):

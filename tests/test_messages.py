@@ -1,7 +1,7 @@
 """Errors from Spotify and the network, said plainly."""
 import unittest
 
-from ui.messages import friendly_error
+from ui.messages import friendly_error, keep_together
 
 
 class FriendlyErrorTests(unittest.TestCase):
@@ -27,6 +27,13 @@ class FriendlyErrorTests(unittest.TestCase):
         self.assertEqual(friendly_error('Boom'), 'Spotify reported a problem: Boom')
         self.assertIsNone(friendly_error('Boom', fallback=False))
         self.assertEqual(friendly_error(''), 'Something went wrong. Try again.')
+
+
+class KeepTogetherTests(unittest.TestCase):
+    def test_an_address_never_breaks_across_lines(self):
+        # A word joiner after each slash removes the line-break chance before "callback".
+        self.assertEqual(keep_together('http://127.0.0.1:8888/callback'),
+                         'http:/⁠/⁠127.0.0.1:8888/⁠callback')
 
 
 if __name__ == '__main__':

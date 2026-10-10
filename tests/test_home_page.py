@@ -4,13 +4,15 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import unittest
 from datetime import date, timedelta
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QPoint, Qt
+from PySide6.QtGui import QColor, QTextFormat
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QFrame, QLabel
 
 from core.history import CheckRecord, NextWindow, short_date
 from core.models import Track
 from ui.pages.home_page import HomePage
+from ui.theme import Theme
 
 TODAY = date.today()
 
@@ -80,6 +82,15 @@ class HomePageTests(unittest.TestCase):
         self.assertTrue(self.page.dates_row.isHidden())
         self.assertFalse(self.page.btn_quiet.isHidden())
 
+    def test_the_date_picker_greys_out_the_days_it_will_not_take(self):
+        self.page.show_ready(NextWindow(days_ago(7), 'ready'), 5, 30, [record(days_ago(30), days_ago(7))])
+        calendar = self.page.date_start.calendarWidget()
+        today = QDate(TODAY.year, TODAY.month, TODAY.day)
+        self.assertEqual(calendar.dateTextFormat(today.addDays(1)).foreground().color(), QColor(Theme.DIM))
+        self.assertFalse(calendar.dateTextFormat(today).hasProperty(QTextFormat.ForegroundBrush))
+        for day in (Qt.Saturday, Qt.Sunday):  # Qt's default red weekends are off-palette
+            self.assertFalse(calendar.weekdayTextFormat(day).hasProperty(QTextFormat.ForegroundBrush))
+
     def test_checking_shows_progress_and_stops(self):
         self.page.show_checking(4, days_ago(7))
         self.page.update_progress(2, 4, 3)
@@ -109,6 +120,27 @@ class HomePageTests(unittest.TestCase):
         self.assertEqual(self.events, [('open_url_requested', 'https://open.spotify.com/playlist/p'),
                                        ('open_url_requested', 'https://open.spotify.com/track/t1'),
                                        ('done_requested',)])
+
+    def rules(self, box):
+        return [found for found in box.findChildren(QFrame) if found.property('role') == 'rule']
+
+    def test_saved_songs_are_separated_by_hairlines(self):
+        self.page.show_done('wavvie', 'u', [song(1), song(2), song(3)])
+        self.assertEqual(len(self.rules(self.page.songs_box)), 2)
+
+    def test_earlier_checks_line_up_in_columns_between_hairlines(self):
+        records = [record(days_ago(7), days_ago(1)), record(days_ago(30), days_ago(7), songs=0, url=None),
+                   record(days_ago(60), days_ago(30), songs=12)]
+        self.page.resize(900, 680)
+        self.page.show()
+        self.page.show_ready(NextWindow(days_ago(1), 'ready'), 5, 30, records)
+        self.app.processEvents()
+        counts = [found for found in self.page.history_box.findChildren(QLabel)
+                  if found.text() in ('3 songs', 'Nothing new', '12 songs')]
+        self.assertEqual(len(counts), 3)
+        self.assertEqual(len({found.mapTo(self.page, QPoint(found.width(), 0)).x() for found in counts}), 1)
+        # One hairline above "Earlier checks", then one between each pair of rows.
+        self.assertEqual(len(self.rules(self.page.history_box)), 3)
 
     def test_done_variants_name_partial_saves_and_json_copies(self):
         copy = os.path.join('folder', 'tracklist_1.json')

@@ -42,6 +42,16 @@ def clear_layout(layout):
             clear_layout(item.layout())
 
 
+def centre(container, column, top=0, bottom=0):
+    """Lay column out in container centred, up to 600 px wide, with at least 24 px either side."""
+    row = QHBoxLayout(container)
+    row.setContentsMargins(24, top, 24, bottom)
+    column.setMaximumWidth(600)
+    row.addStretch(1)
+    row.addWidget(column, 100)
+    row.addStretch(1)
+
+
 def scroll_column(owner, top=32, bottom=32):
     """Give owner a vertical scroll area holding one centred column up to 600 px wide."""
     outer = QVBoxLayout(owner)
@@ -50,16 +60,13 @@ def scroll_column(owner, top=32, bottom=32):
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    # A click still lets the keys scroll, but Tab skips the area: it has no focus ring to show.
+    scroll.setFocusPolicy(Qt.ClickFocus)
     outer.addWidget(scroll)
     content = QWidget()
     scroll.setWidget(content)
-    row = QHBoxLayout(content)
-    row.setContentsMargins(24, top, 24, bottom)
     column = QWidget()
-    column.setMaximumWidth(600)
-    row.addStretch(1)
-    row.addWidget(column, 100)
-    row.addStretch(1)
+    centre(content, column, top, bottom)
     layout = QVBoxLayout(column)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(12)

@@ -81,6 +81,24 @@ class SettingsPageTests(unittest.TestCase):
         self.assertTrue(page.spin_from.isEnabled())
         self.assertEqual(page.spin_to.maximum(), 12)
 
+    def test_the_range_starts_out_covering_every_artist(self):
+        page = self.page()
+        page.set_artist_count(325)
+        self.assertEqual((page.spin_from.value(), page.spin_to.value()), (1, 325))
+        self.assertFalse(self.settings.contains('artist_range_end'))
+        self.settings.clear()
+        page.load_settings()
+        self.assertEqual(page.spin_to.value(), 325)
+        page.chk_range.setChecked(True)
+        self.assertEqual(read_preferences().artist_range, (1, 325))
+
+    def test_a_saved_range_survives_a_new_artist_count(self):
+        self.settings.setValue('artist_range_start', 2)
+        self.settings.setValue('artist_range_end', 9)
+        page = self.page()
+        page.set_artist_count(325)
+        self.assertEqual((page.spin_from.value(), page.spin_to.value()), (2, 9))
+
     def test_account_and_busy_state(self):
         page = self.page()
         page.set_account('Listener')

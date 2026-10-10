@@ -13,7 +13,7 @@ from core.models import ScanConfiguration, Track
 from core.spotify_service import SpotifyReleaseService
 from core.workers import AuthWorker, ImageLoadWorker, LoadArtistsWorker, PlaylistWorker, ScanWorker
 from main import load_environment, save_environment
-from ui.messages import friendly_error
+from ui.messages import friendly_error, keep_together
 from ui.pages.home_page import HomePage
 from ui.pages.settings_page import SettingsPage, read_preferences
 from ui.pages.setup_page import SetupPage
@@ -22,7 +22,8 @@ from ui.resources import resource_path
 from ui.theme import Theme
 from ui.widgets.activity_log import ActivityLog, ActivityLogDialog
 from ui.widgets.avatar import Avatar
-from ui.widgets.controls import button
+from ui.widgets.controls import button, centre
+from ui.widgets.focus_rings import FocusRings
 
 SOME_ARTISTS_FAILED = "Some artists couldn't be checked. Your next check will look at these dates again."
 PARTLY_SAVED = ("Spotify stopped responding while adding songs. Open the playlist to check it; "
@@ -71,6 +72,7 @@ class MainWindow(QMainWindow):
         self.scan_warnings: List[str] = []
         self.log_dialog = None
         self.activity_log = ActivityLog(self)
+        self.focus_rings = FocusRings(self)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -78,15 +80,21 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         self.header = QWidget()
-        header = QHBoxLayout(self.header)
-        header.setContentsMargins(24, 14, 24, 4)
-        header.setSpacing(12)
+        bar = QWidget()
+        centre(self.header, bar, top=14, bottom=4)
+        header = QHBoxLayout(bar)
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(16)
         self.wordmark = QLabel()
         self.wordmark.setPixmap(QPixmap(str(resource_path("wavvie_wordmark_white.png")))
                                 .scaledToHeight(28, Qt.SmoothTransformation))
         self.wordmark.setAccessibleName("wavvie")
         self.avatar = Avatar(30)
         self.btn_settings = button("Settings", "quiet", "openSettings")
+        # Settings hides while its page is open; keeping its space stops the avatar jumping.
+        policy = self.btn_settings.sizePolicy()
+        policy.setRetainSizeWhenHidden(True)
+        self.btn_settings.setSizePolicy(policy)
         header.addWidget(self.wordmark)
         header.addStretch()
         header.addWidget(self.avatar)
@@ -102,6 +110,8 @@ class MainWindow(QMainWindow):
         self.settings_page = SettingsPage()
         for page in (self.setup_page, self.sign_in_page, self.home_page, self.settings_page):
             self.stack.addWidget(page)
+        for page in (self.home_page, self.settings_page):
+            page.scroll.verticalScrollBar().rangeChanged.connect(self.align_header)
 
         self.setup_page.credentials_entered.connect(self.save_credentials)
         self.setup_page.open_url_requested.connect(self.open_url)
@@ -134,6 +144,19 @@ class MainWindow(QMainWindow):
     def show_page(self, page):
         self.stack.setCurrentWidget(page)
         self.header.setVisible(page in (self.home_page, self.settings_page))
+        self.btn_settings.setVisible(page is not self.settings_page)
+        self.align_header()
+
+    def align_header(self, *_):
+        """Keep the header over the column, which moves left when the page's scroll bar appears."""
+        page = self.stack.currentWidget()
+        bar = page.scroll.verticalScrollBar() if page in (self.home_page, self.settings_page) else None
+        scrolls = bar is not None and bar.maximum() > bar.minimum()
+        margins = self.header.layout().contentsMargins()
+        margins.setRight(margins.left() + (bar.sizeHint().width() if scrolls else 0))
+        self.header.layout().setContentsMargins(margins)
+        # Apply it now, in the same pass as the content's re-layout, so the header never lags a frame.
+        self.header.layout().activate()
 
     def set_operation(self, operation):
         self.operation = operation
@@ -219,7 +242,7 @@ class MainWindow(QMainWindow):
         if not self.sign_in_cancelled:
             error = friendly_error(message, fallback=False) or (
                 f"Couldn't connect to Spotify. Check that your app's redirect URI is "
-                f"{self.service.redirect_uri}, then try again.")
+                f"{keep_together(self.service.redirect_uri)}, then try again.")
         self.sign_in_page.show_idle(error)
         self.show_page(self.sign_in_page)
 
