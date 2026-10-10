@@ -4,10 +4,13 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 import io
 import sys
 import json
+import socket
 import tempfile
+import threading
 import time
 import unittest
 import importlib
+import urllib.request
 from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -29,6 +32,38 @@ def track(number=1, **changes):
     base = Track(str(number), f'Song {number}', 'Album <live>', 'album', 'single', '2026-09-01',
                  'Artist', 'artist', False, 'main', ['Artist'], f'song {number}|artist')
     return replace(base, **changes)
+
+
+class BrowserSignIn:
+    """A real spotipy sign-in waiting on its local redirect server, with the browser launch patched out."""
+    def __init__(self, test, directory):
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            port = probe.getsockname()[1]
+        self.redirect_uri = f'http://127.0.0.1:{port}/callback'
+        self.cache_path = str(Path(directory) / 'token-cache')
+        browser = patch('spotipy.oauth2.webbrowser.open')
+        self.browser_opened = browser.start()
+        test.addCleanup(browser.stop)
+        # Never leave a test thread blocked on the redirect server.
+        test.addCleanup(self.redirect_back, 'test_cleanup')
+
+    def service(self):
+        return SpotifyReleaseService(client_id='test-id', client_secret='test-secret',
+                                     redirect_uri=self.redirect_uri, cache_path=self.cache_path)
+
+    def wait_until_waiting(self):
+        # spotipy opens the browser only after its redirect server is listening.
+        deadline = time.monotonic() + 3
+        while not self.browser_opened.called and time.monotonic() < deadline:
+            QTest.qWait(10)
+        return self.browser_opened.called
+
+    def redirect_back(self, error):
+        try:
+            urllib.request.urlopen(f'{self.redirect_uri}?error={error}', timeout=1).close()
+        except OSError:
+            pass
 
 
 class DesktopUXTests(unittest.TestCase):
@@ -368,6 +403,37 @@ class DesktopUXTests(unittest.TestCase):
         self.assertFalse(page.loading)
         self.assertEqual(page.selected_tracks(), [track(999)])
 
+    def test_cancel_sign_in_releases_the_browser_wait(self):
+        sign_in = BrowserSignIn(self, self.directory.name)
+        self.window.service = sign_in.service()
+        self.window.start_authentication()
+        self.assertTrue(sign_in.wait_until_waiting())
+        self.assertFalse(self.window.auth_page.btn_cancel_auth.isHidden())
+
+        self.window.auth_page.btn_cancel_auth.click()
+        deadline = time.monotonic() + 5
+        while self.window.operation and time.monotonic() < deadline:
+            QTest.qWait(10)
+
+        self.assertIsNone(self.window.operation)
+        self.assertTrue(self.window.auth_page.btn_connect.isEnabled())
+        self.assertIn('Sign-in cancelled', self.window.notice_text.text())
+
+    def test_closing_during_sign_in_releases_the_browser_wait(self):
+        sign_in = BrowserSignIn(self, self.directory.name)
+        self.window.service = sign_in.service()
+        self.window.show()
+        self.window.start_authentication()
+        self.assertTrue(sign_in.wait_until_waiting())
+
+        self.window.close()
+        deadline = time.monotonic() + 5
+        while self.window.isVisible() and time.monotonic() < deadline:
+            QTest.qWait(10)
+
+        self.assertFalse(self.window.isVisible())
+        self.assertEqual(self.window.thread_pool.activeThreadCount(), 0)
+
     def test_keyboard_search_and_form_accessibility(self):
         self.window.on_shortcut_focus_search()
         self.assertEqual(self.window.page_stack.currentIndex(), 3)
@@ -397,6 +463,24 @@ class WorkerAndServiceUXTests(unittest.TestCase):
         worker.run()
         self.assertEqual(errors, ['Denied'])
         self.assertEqual(self.service.callbacks, {})
+
+    def test_cancel_authentication_releases_a_waiting_browser_sign_in(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        sign_in = BrowserSignIn(self, directory.name)
+        service = sign_in.service()
+        failures, outcome = [], []
+        service.register_callback('auth_failed', failures.append)
+        thread = threading.Thread(target=lambda: outcome.append(service.authenticate()))
+        thread.start()
+        self.assertTrue(sign_in.wait_until_waiting())
+
+        service.cancel_authentication()
+        thread.join(5)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcome, [False])
+        self.assertEqual(len(failures), 1)
 
     def test_image_load_scales_and_reports_decode_errors(self):
         image = QImage(100, 80, QImage.Format_RGB32)

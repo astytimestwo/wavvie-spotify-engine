@@ -40,6 +40,7 @@ class MainWindow(QMainWindow):
         self.operation = None
         self.scan_origin = None
         self.closing = False
+        self.sign_in_cancelled = False
         self.scan_warnings = []
         self.image_requests = {}
         self.account_generation = 0
@@ -113,6 +114,7 @@ class MainWindow(QMainWindow):
         
         # Setup page connections
         self.auth_page.auth_requested.connect(self.start_authentication)
+        self.auth_page.auth_cancel_requested.connect(self.cancel_authentication)
         self.auth_page.recheck_requested.connect(self.recheck_config)
         self.dashboard_page.quick_start_requested.connect(self.quick_start_scan)
         self.dashboard_page.cancel_scan_requested.connect(self.cancel_release_scan)
@@ -268,6 +270,7 @@ class MainWindow(QMainWindow):
         if not self.can_start_operation():
             return
         self.set_operation("auth")
+        self.sign_in_cancelled = False
         self.auth_page.set_connecting(True)
         self.show_toast("Complete the Spotify sign-in in your browser. This window will update when you return.")
         self.set_app_status("Connecting")
@@ -286,12 +289,22 @@ class MainWindow(QMainWindow):
         self.set_app_status("Connected")
         self.show_authenticated(user_data)
 
+    def cancel_authentication(self):
+        if self.operation != "auth":
+            return
+        self.sign_in_cancelled = True
+        self.set_app_status("Cancelling sign-in")
+        self.service.cancel_authentication()
+
     @Slot(str)
     def on_auth_error(self, err_msg):
         self.set_operation(None)
         self.auth_page.set_connecting(False)
-        self.set_app_status("Connection failed")
-        self.show_toast(f"Could not connect to Spotify. Check your credentials and redirect URI, then try Connect again. {err_msg}", "error")
+        if self.sign_in_cancelled:
+            self.show_toast("Sign-in cancelled. Connect again when you're ready.")
+        else:
+            self.set_app_status("Connection failed")
+            self.show_toast(f"Could not connect to Spotify. Check your credentials and redirect URI, then try Connect again. {err_msg}", "error")
         self.show_auth_required()
 
     # --- ASYNC LOAD ARTISTS WORKER ---
@@ -664,6 +677,8 @@ class MainWindow(QMainWindow):
                 self.closing = True
                 if self.operation == "scan":
                     self.cancel_release_scan()
+                elif self.operation == "auth":
+                    self.cancel_authentication()
                 else:
                     self.service.cancel_scan()
                 self.set_operation(self.operation)
@@ -676,6 +691,9 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def finish_close(self):
+        if self.operation == "auth":
+            # Close may have been requested before spotipy started waiting for the browser.
+            self.service.cancel_authentication()
         if not self.thread_pool.activeThreadCount():
             self.close_timer.stop()
             self.close()

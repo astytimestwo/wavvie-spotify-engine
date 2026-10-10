@@ -8,6 +8,7 @@ from main import load_environment
 
 class AuthPage(QWidget):
     auth_requested = Signal()
+    auth_cancel_requested = Signal()
     recheck_requested = Signal()
 
     def __init__(self, parent=None):
@@ -61,6 +62,7 @@ class AuthPage(QWidget):
         
         # Connect button & Setup card slots
         self.btn_connect = None
+        self.btn_cancel_auth = None
         self.setup_card = None
         
         self.update_ui_state()
@@ -81,6 +83,7 @@ class AuthPage(QWidget):
                 widget.hide()
                 widget.deleteLater()
         self.btn_connect = None
+        self.btn_cancel_auth = None
                 
         if client_id and client_secret:
             # Credentials exist, show normal Connect button
@@ -111,7 +114,14 @@ class AuthPage(QWidget):
             self.btn_connect.clicked.connect(self.auth_requested.emit)
         
         self.content_layout.addWidget(self.btn_connect, 0, Qt.AlignCenter)
-        
+
+        # Shown while waiting for the browser, which may never return (closed tab, redirect URI error).
+        self.btn_cancel_auth = QPushButton("Cancel sign-in")
+        self.btn_cancel_auth.setCursor(Qt.PointingHandCursor)
+        self.btn_cancel_auth.clicked.connect(self.auth_cancel_requested.emit)
+        self.btn_cancel_auth.hide()
+        self.content_layout.addWidget(self.btn_cancel_auth, 0, Qt.AlignCenter)
+
         status_label = QLabel("Sign in through Spotify in your browser. Return here when you're connected.")
         status_label.setWordWrap(True)
         status_label.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 12px; margin-top: 16px;")
@@ -210,6 +220,8 @@ class AuthPage(QWidget):
         if self.btn_connect:
             self.btn_connect.setEnabled(not connecting)
             self.btn_connect.setText("Connecting Spotify..." if connecting else "Connect Spotify Account")
+        if self.btn_cancel_auth:
+            self.btn_cancel_auth.setVisible(connecting)
 
     def set_connected(self, connected: bool):
         self.is_connected = connected

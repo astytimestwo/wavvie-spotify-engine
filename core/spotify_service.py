@@ -8,6 +8,8 @@ import logging
 import json
 import os
 import sys
+import urllib.request
+from urllib.parse import urlparse
 from typing import List, Dict, Callable, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -83,6 +85,19 @@ class SpotifyReleaseService:
                 self.http_session.close()
             self.trigger_callback("auth_failed", str(e))
             return False
+
+    def cancel_authentication(self):
+        """Release a sign-in that is waiting for the browser to return to the local redirect URI."""
+        redirect = urlparse(self.redirect_uri)
+        if redirect.scheme != 'http' or redirect.hostname not in ('127.0.0.1', 'localhost') or not redirect.port:
+            return
+        # spotipy's callback server waits for one request without a timeout and
+        # treats an error redirect as a refused sign-in.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            opener.open(f"http://127.0.0.1:{redirect.port}{redirect.path}?error=cancelled", timeout=2).close()
+        except OSError:
+            pass
 
     def disconnect(self):
         if self.http_session:
