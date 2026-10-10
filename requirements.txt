@@ -1,4 +1,5 @@
 spotipy
+requests
 python-dotenv
 PySide6
 pillow

@@ -74,3 +74,4 @@ class PlaylistResult:
     playlist_url: str
     tracks_added: int
     json_path: Optional[str] = None
+    error: Optional[str] = None

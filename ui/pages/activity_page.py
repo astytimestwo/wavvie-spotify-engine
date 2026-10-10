@@ -1,5 +1,5 @@
 import logging
-from PySide6.QtCore import Qt, QObject, Signal, Slot
+from PySide6.QtCore import Qt, QObject, Signal, Slot, QTimer
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPlainTextEdit, QPushButton, QComboBox, QLineEdit, QFrame, QLabel
 from PySide6.QtGui import QFont, QGuiApplication
 from ui.theme import Theme
@@ -27,7 +27,7 @@ class ActivityPage(QWidget):
         
         # Header
         header = QHBoxLayout()
-        title = QLabel("System Activity Log")
+        title = QLabel("Activity")
         title.setProperty("class", "heading")
         title.setStyleSheet("font-size: 24px;")
         header.addWidget(title)
@@ -35,7 +35,7 @@ class ActivityPage(QWidget):
         header.addStretch()
         
         # Copy Actions
-        self.btn_copy_all = QPushButton("Copy All")
+        self.btn_copy_all = QPushButton("Copy visible log")
         self.btn_copy_all.setCursor(Qt.PointingHandCursor)
         self.btn_copy_all.clicked.connect(self.copy_all)
         header.addWidget(self.btn_copy_all)
@@ -52,6 +52,8 @@ class ActivityPage(QWidget):
         
         self.txt_filter = QLineEdit()
         self.txt_filter.setPlaceholderText("Filter logs... (type to search)")
+        self.txt_filter.setClearButtonEnabled(True)
+        self.txt_filter.setAccessibleName("Search activity")
         self.txt_filter.textChanged.connect(self.refilter_logs)
         toolbar.addWidget(self.txt_filter, 1)
         
@@ -74,6 +76,8 @@ class ActivityPage(QWidget):
         # Log Text Box
         self.txt_log = QPlainTextEdit()
         self.txt_log.setReadOnly(True)
+        self.txt_log.setPlaceholderText("Scan updates and connection messages will appear here.")
+        self.txt_log.setMaximumBlockCount(2000)
         self.txt_log.setFont(QFont(Theme.FONT_MONO, 10))
         self.txt_log.setStyleSheet(f"""
             QPlainTextEdit {{
@@ -88,6 +92,9 @@ class ActivityPage(QWidget):
         
         # Store full log cache for filtering
         self.all_log_records: list[tuple[str, int]] = []
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setSingleShot(True)
+        self.refresh_timer.timeout.connect(self.refilter_logs)
         
         # Wire standard library logging to this page
         self.handler = SignallingLogHandler()
@@ -99,7 +106,9 @@ class ActivityPage(QWidget):
     @Slot(str, int)
     def append_log_record(self, formatted_msg: str, level: int):
         self.all_log_records.append((formatted_msg, level))
-        self.refilter_logs()
+        del self.all_log_records[:-2000]
+        if not self.refresh_timer.isActive():
+            self.refresh_timer.start(100)
 
     def clear_log(self):
         self.all_log_records.clear()
@@ -110,6 +119,9 @@ class ActivityPage(QWidget):
         clipboard.setText(self.txt_log.toPlainText())
 
     def refilter_logs(self):
+        bar = self.txt_log.verticalScrollBar()
+        previous_position = bar.value()
+        follow = previous_position >= bar.maximum() - 4
         filter_text = self.txt_filter.text().lower()
         filter_level = self.combo_level.currentIndex()
         
@@ -144,4 +156,4 @@ class ActivityPage(QWidget):
             filtered_lines.append(msg)
             
         self.txt_log.setPlainText("\n".join(filtered_lines))
-        self.txt_log.verticalScrollBar().setValue(self.txt_log.verticalScrollBar().maximum())
+        bar.setValue(bar.maximum() if follow else previous_position)

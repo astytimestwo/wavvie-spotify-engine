@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtCore import Qt, Signal, QSettings, QSignalBlocker
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QFrame, QGridLayout, QSpinBox, 
                                QCheckBox, QLineEdit, QComboBox)
@@ -87,17 +87,17 @@ class SettingsPage(QWidget):
         # Default Playlist Name
         pref_layout.addWidget(QLabel("Default Playlist Name:"), 3, 0)
         self.txt_playlist_name = QLineEdit()
-        self.txt_playlist_name.textChanged.connect(self.save_settings)
+        self.txt_playlist_name.editingFinished.connect(self.save_settings)
         pref_layout.addWidget(self.txt_playlist_name, 3, 1)
         
         # Default Playlist Desc
         pref_layout.addWidget(QLabel("Default Playlist Desc:"), 4, 0)
         self.txt_playlist_desc = QLineEdit()
-        self.txt_playlist_desc.textChanged.connect(self.save_settings)
+        self.txt_playlist_desc.editingFinished.connect(self.save_settings)
         pref_layout.addWidget(self.txt_playlist_desc, 4, 1)
         
         # Checkboxes
-        toggles = QHBoxLayout()
+        toggles = QVBoxLayout()
         self.chk_export = QCheckBox("Export JSON After Scan")
         self.chk_export.stateChanged.connect(self.save_settings)
         toggles.addWidget(self.chk_export)
@@ -106,7 +106,7 @@ class SettingsPage(QWidget):
         self.chk_create_pl.stateChanged.connect(self.save_settings)
         toggles.addWidget(self.chk_create_pl)
         
-        self.chk_reduced_motion = QCheckBox("Reduced Motion Option")
+        self.chk_reduced_motion = QCheckBox("Reduce animation and motion")
         self.chk_reduced_motion.stateChanged.connect(self.save_settings)
         toggles.addWidget(self.chk_reduced_motion)
         
@@ -129,18 +129,25 @@ class SettingsPage(QWidget):
         self.lbl_cache_path.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 13px;")
         cache_layout.addWidget(self.lbl_cache_path)
         
-        self.btn_clear_cache = QPushButton("Clear Followed Artists Cache")
+        self.btn_clear_cache = QPushButton("Refresh artist list")
         self.btn_clear_cache.setCursor(Qt.PointingHandCursor)
         self.btn_clear_cache.clicked.connect(self.clear_cache_requested.emit)
         cache_layout.addWidget(self.btn_clear_cache)
         
         layout.addWidget(cache_card)
+        self.lbl_saved = QLabel("Changes are saved automatically.")
+        self.lbl_saved.setWordWrap(True)
+        layout.addWidget(self.lbl_saved)
         layout.addStretch()
         
         # Load settings initially
         self.load_settings()
 
     def load_settings(self):
+        # Loading one control must not save the still-uninitialized others.
+        blockers = [QSignalBlocker(control) for control in (
+            self.spin_workers, self.txt_playlist_name, self.txt_playlist_desc,
+            self.chk_export, self.chk_create_pl, self.chk_reduced_motion, self.combo_cutoff)]
         settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         
         workers = settings.value("default_workers", 5, type=int)
@@ -160,10 +167,13 @@ class SettingsPage(QWidget):
         self.combo_cutoff.setCurrentIndex(cutoff_idx)
 
     def save_settings(self):
+        if not self.txt_playlist_name.text().strip():
+            self.lbl_saved.setText("Enter a default playlist name to save your preferences.")
+            return
         settings = QSettings("wavvie", "SpotifyPlaylistCreator")
         
         settings.setValue("default_workers", self.spin_workers.value())
-        settings.setValue("default_playlist_name", self.txt_playlist_name.text())
+        settings.setValue("default_playlist_name", self.txt_playlist_name.text().strip())
         settings.setValue("default_playlist_desc", self.txt_playlist_desc.text())
         settings.setValue("auto_export_json", self.chk_export.isChecked())
         settings.setValue("auto_create_playlist", self.chk_create_pl.isChecked())
@@ -175,6 +185,9 @@ class SettingsPage(QWidget):
         days = cutoff_days_map.get(self.combo_cutoff.currentIndex(), 30)
         settings.setValue("default_cutoff_days", days)
         
+        settings.sync()
+        self.lbl_saved.setText("Preferences saved." if settings.status() == QSettings.NoError
+                               else "Preferences could not be saved. Check local storage permissions.")
         self.settings_changed.emit()
 
     def update_connection_status(self, user_name: str, redirect_uri: str):

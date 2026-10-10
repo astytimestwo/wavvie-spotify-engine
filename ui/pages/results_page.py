@@ -1,12 +1,13 @@
 from typing import List, Dict, Optional
 import os
-from PySide6.QtCore import Qt, Signal, QUrl, QRectF
+from PySide6.QtCore import Qt, Signal, QUrl, QRectF, QSignalBlocker, QSize, QTimer, QPoint
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                QPushButton, QFrame, QLineEdit, QListWidget, 
                                QListWidgetItem, QComboBox, QCheckBox, QSplitter,
-                               QTextEdit)
+                               QTextEdit, QSizePolicy, QDialog)
 from PySide6.QtGui import QImage, QPixmap, QDesktopServices, QPainter, QColor, QBrush, QRadialGradient
 from ui.theme import Theme
+from ui.widgets.elided_label import ElidedLabel
 from core.models import Track
 
 def extract_dominant_color(qimage: QImage) -> QColor:
@@ -36,6 +37,7 @@ class TrackItemWidget(QWidget):
         
         # 1. Checkbox
         self.chk = QCheckBox()
+        self.chk.setAccessibleName(f"Select {track.track_name} by {', '.join(track.all_artists)}")
         self.chk.setChecked(True)
         self.chk.stateChanged.connect(lambda state: self.checked_changed.emit(state == 2))
         layout.addWidget(self.chk)
@@ -52,9 +54,15 @@ class TrackItemWidget(QWidget):
         details_layout.setContentsMargins(0, 0, 0, 0)
         details_layout.setSpacing(2)
         
-        self.lbl_title = QLabel(track.track_name)
+        self.lbl_title = ElidedLabel(track.track_name)
+        self.lbl_title.setTextFormat(Qt.PlainText)
+        self.lbl_title.setToolTip(track.track_name)
+        self.lbl_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lbl_title.setStyleSheet(f"color: {Theme.STRONG_TEXT}; font-weight: bold; font-size: 13px;")
-        self.lbl_artist = QLabel(", ".join(track.all_artists))
+        self.lbl_artist = ElidedLabel(", ".join(track.all_artists))
+        self.lbl_artist.setTextFormat(Qt.PlainText)
+        self.lbl_artist.setToolTip(", ".join(track.all_artists))
+        self.lbl_artist.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lbl_artist.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 11px;")
         
         details_layout.addWidget(self.lbl_title)
@@ -63,9 +71,10 @@ class TrackItemWidget(QWidget):
         
         # 4. Album name
         self.lbl_album = QLabel(track.album_name)
-        self.lbl_album.setFixedWidth(140)
+        self.lbl_album.setTextFormat(Qt.PlainText)
+        self.lbl_album.setToolTip(track.album_name)
+        self.lbl_album.hide()
         self.lbl_album.setStyleSheet(f"color: {Theme.MUTED_TEXT}; font-size: 11px;")
-        layout.addWidget(self.lbl_album)
         
         # 5. Badges
         # Album type
@@ -119,7 +128,8 @@ class DetailPanel(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("DetailPanel")
-        self.setFixedWidth(320)
+        self.setMinimumWidth(260)
+        self.setMaximumWidth(340)
         self.setStyleSheet(f"""
             QFrame#DetailPanel {{
                 background-color: {Theme.ELEVATED_SURFACE};
@@ -142,6 +152,7 @@ class DetailPanel(QFrame):
         
         # Text details
         self.lbl_title = QLabel("Select a Track")
+        self.lbl_title.setTextFormat(Qt.PlainText)
         self.lbl_title.setProperty("class", "heading")
         self.lbl_title.setWordWrap(True)
         self.lbl_title.setAlignment(Qt.AlignCenter)
@@ -149,6 +160,7 @@ class DetailPanel(QFrame):
         layout.addWidget(self.lbl_title)
         
         self.lbl_artists = QLabel("")
+        self.lbl_artists.setTextFormat(Qt.PlainText)
         self.lbl_artists.setWordWrap(True)
         self.lbl_artists.setAlignment(Qt.AlignCenter)
         self.lbl_artists.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 12px;")
@@ -196,17 +208,21 @@ class DetailPanel(QFrame):
             
         self.btn_spotify.setEnabled(True)
         
-        # Format metadata
-        meta_html = f"""
-            <p><b>Album:</b> {track.album_name}</p>
-            <p><b>Release Date:</b> {track.release_date}</p>
-            <p><b>Type:</b> {track.album_type.upper()}</p>
-            <p><b>Role:</b> {track.performer_role.upper()}</p>
-            <p><b>Collaboration:</b> {"Yes" if track.is_collaboration else "No"}</p>
-            <p><b>Signature:</b> <code style="font-family: {Theme.FONT_MONO}; font-size: 11px;">{track.track_signature}</code></p>
-        """
-        self.meta_text.setHtml(meta_html)
+        self.meta_text.setPlainText(
+            f"Album\n{track.album_name}\n\nReleased\n{track.release_date}\n\n"
+            f"Release type\n{track.album_type.title()}\n\nRole\n{track.performer_role.title()}")
         self.update()  # Trigger paintEvent for glow repaint
+
+    def clear(self):
+        self.current_track = None
+        self.lbl_title.setText("Select a track")
+        self.lbl_artists.clear()
+        self.lbl_large_art.clear()
+        self.lbl_large_art.setText("Artwork")
+        self.meta_text.setPlainText("Choose a release to see its details and open it in Spotify.")
+        self.btn_spotify.setEnabled(False)
+        self.ambient_color = QColor(0, 0, 0, 0)
+        self.update()
 
     def open_spotify_link(self):
         if self.current_track and self.current_track.track_id:
@@ -241,9 +257,16 @@ class DetailPanel(QFrame):
 class ResultsPage(QWidget):
     create_playlist_requested = Signal(list)  # list of tracks to add
     export_json_requested = Signal(list)
+    artwork_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.busy = False
+        self.has_scanned = False
+        self.loading = False
+        self.load_timer = QTimer(self)
+        self.load_timer.setSingleShot(True)
+        self.load_timer.timeout.connect(self.load_next_rows)
         
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -264,6 +287,9 @@ class ResultsPage(QWidget):
         header.addWidget(title)
         
         header.addStretch()
+        self.btn_details = QPushButton("Track details")
+        self.btn_details.clicked.connect(self.show_details)
+        header.addWidget(self.btn_details)
         
         self.btn_export = QPushButton("Export JSON")
         self.btn_export.setCursor(Qt.PointingHandCursor)
@@ -283,6 +309,8 @@ class ResultsPage(QWidget):
         
         self.txt_search = QLineEdit()
         self.txt_search.setPlaceholderText("Search tracks or artists... (Ctrl+F)")
+        self.txt_search.setClearButtonEnabled(True)
+        self.txt_search.setAccessibleName("Search tracks, artists, or albums")
         self.txt_search.textChanged.connect(self.filter_tracks)
         filter_layout.addWidget(self.txt_search, 1)
         
@@ -310,7 +338,7 @@ class ResultsPage(QWidget):
         
         # Selection tools
         select_row = QHBoxLayout()
-        self.chk_select_all = QCheckBox("Select All / Deselect All")
+        self.chk_select_all = QCheckBox("Select visible tracks")
         self.chk_select_all.setChecked(True)
         self.chk_select_all.stateChanged.connect(self.toggle_all_selection)
         select_row.addWidget(self.chk_select_all)
@@ -322,6 +350,29 @@ class ResultsPage(QWidget):
         select_row.addWidget(self.lbl_selected_count)
         
         canvas_layout.addLayout(select_row)
+
+        self.empty_label = QLabel("Your releases will appear here. Start a scan from Home or New Release Scan.")
+        self.empty_label.setWordWrap(True)
+        self.empty_label.setAlignment(Qt.AlignCenter)
+        self.empty_label.setMinimumHeight(100)
+        canvas_layout.addWidget(self.empty_label)
+        self.btn_clear_filters = QPushButton("Clear filters")
+        self.btn_clear_filters.clicked.connect(self.clear_filters)
+        canvas_layout.addWidget(self.btn_clear_filters, 0, Qt.AlignLeft)
+
+        self.output_label = QLabel("")
+        self.output_label.setWordWrap(True)
+        self.output_label.setTextFormat(Qt.PlainText)
+        canvas_layout.addWidget(self.output_label)
+        self.btn_open_output = QPushButton("Open output")
+        self.btn_open_output.clicked.connect(self.open_output)
+        self.btn_open_output.hide()
+        canvas_layout.addWidget(self.btn_open_output, 0, Qt.AlignLeft)
+        self.btn_export_folder = QPushButton("Open export folder")
+        self.btn_export_folder.clicked.connect(lambda: QDesktopServices.openUrl(self.export_url))
+        self.btn_export_folder.hide()
+        canvas_layout.addWidget(self.btn_export_folder, 0, Qt.AlignLeft)
+        self.outputs = {}
         
         # List Widget
         self.track_list = QListWidget()
@@ -348,28 +399,49 @@ class ResultsPage(QWidget):
                 border: 1px solid {Theme.VIOLET_ACCENT};
             }}
         """)
-        self.track_list.itemClicked.connect(self.on_track_clicked)
+        self.track_list.currentItemChanged.connect(lambda item, previous: self.on_track_clicked(item))
+        self.track_list.setAccessibleName("Discovered releases")
+        self.track_list.verticalScrollBar().valueChanged.connect(self.request_visible_artwork)
         canvas_layout.addWidget(self.track_list, 1)
         
-        main_layout.addWidget(canvas, 1)
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setChildrenCollapsible(False)
+        self.splitter.addWidget(canvas)
+        main_layout.addWidget(self.splitter)
         
         # Right Detail Panel
         self.detail_panel = DetailPanel()
-        main_layout.addWidget(self.detail_panel)
+        self.splitter.addWidget(self.detail_panel)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setSizes([800, 280])
         
         self.all_tracks: List[Track] = []
         self.item_widgets: Dict[str, TrackItemWidget] = {}
         self.artwork_cache: Dict[str, QImage] = {}
+        self.detail_panel.clear()
+        self.update_selection_metrics()
 
     def set_results(self, tracks: List[Track]):
-        self.all_tracks = tracks
+        self.load_timer.stop()
+        self.has_scanned = True
+        self.all_tracks = list(tracks)
+        self.detail_panel.clear()
+        self.output_label.clear()
+        self.outputs.clear()
+        self.btn_open_output.hide()
+        self.btn_export_folder.hide()
         self.track_list.clear()
         self.item_widgets.clear()
-        
-        for track in tracks:
+        self.load_index = 0
+        self.loading = bool(tracks)
+        self.load_next_rows()
+
+    def load_next_rows(self):
+        # Yield between small batches so navigation and cancellation stay responsive.
+        end = min(self.load_index + 50, len(self.all_tracks))
+        for track in self.all_tracks[self.load_index:end]:
             item = QListWidgetItem(self.track_list)
-            # Size hint
-            item.setSizeHint(item.sizeHint())
+            item.setSizeHint(QSize(0, 80))
             
             widget = TrackItemWidget(track)
             widget.checked_changed.connect(self.update_selection_metrics)
@@ -378,25 +450,86 @@ class ResultsPage(QWidget):
             self.item_widgets[track.track_id] = widget
             
             self.track_list.setItemWidget(item, widget)
-            
+            if track.album_artwork_url in self.artwork_cache:
+                widget.set_artwork(self.artwork_cache[track.album_artwork_url])
+        self.load_index = end
+        self.loading = end < len(self.all_tracks)
         self.filter_tracks()
-        self.update_selection_metrics()
+        if self.loading:
+            self.load_timer.start(1)
+        self.request_visible_artwork()
 
     def update_selection_metrics(self):
-        total = len(self.item_widgets)
-        selected = sum([1 for w in self.item_widgets.values() if w.chk.isChecked()])
-        self.lbl_selected_count.setText(f"Selected: {selected} / {total} tracks")
+        visible = list(self.visible_widgets())
+        selected = sum(w.chk.isChecked() for w in visible)
+        self.lbl_selected_count.setText(f"{len(visible)} of {len(self.all_tracks)} shown · {selected} selected")
+        blocker = QSignalBlocker(self.chk_select_all)
+        self.chk_select_all.setCheckState(Qt.Checked if visible and selected == len(visible)
+                                         else Qt.PartiallyChecked if selected else Qt.Unchecked)
+        available = not self.busy and not self.loading
+        self.chk_select_all.setEnabled(bool(visible) and available)
+        self.btn_export.setEnabled(bool(selected) and available)
+        self.btn_create_pl.setEnabled(bool(selected) and available)
+        self.btn_create_pl.setText(f"Create playlist ({selected})" if selected else "Create playlist")
+        self.empty_label.setVisible(not visible)
+        self.track_list.setVisible(bool(visible))
+        filtered = bool(self.txt_search.text() or self.combo_type.currentIndex() or self.combo_role.currentIndex())
+        self.btn_clear_filters.setVisible(filtered)
+        if self.all_tracks:
+            self.empty_label.setText("No releases match these filters. Try another search or clear the filters.")
+        elif self.has_scanned:
+            self.empty_label.setText("No releases found in this scan. Try an earlier date or a wider artist range.")
+        else:
+            self.empty_label.setText("Your releases will appear here. Start a scan from Home or New Release Scan.")
+        if self.loading:
+            self.empty_label.setText(f"Preparing results… {self.load_index} of {len(self.all_tracks)} tracks")
+            self.empty_label.show()
+
+    def visible_widgets(self):
+        for index in range(self.track_list.count()):
+            item = self.track_list.item(index)
+            if not item.isHidden():
+                widget = self.track_list.itemWidget(item)
+                if widget:
+                    yield widget
+
+    def selected_tracks(self):
+        return [w.track for w in self.visible_widgets() if w.chk.isChecked()]
+
+    def set_busy(self, busy):
+        self.busy = busy
+        self.update_selection_metrics()
+
+    def clear_filters(self):
+        self.txt_search.clear()
+        self.combo_type.setCurrentIndex(0)
+        self.combo_role.setCurrentIndex(0)
+
+    def show_output(self, message, url, button_text):
+        self.output_url = url
+        if url.isLocalFile():
+            self.export_url = url
+            self.outputs['export'] = message
+            self.btn_export_folder.show()
+        else:
+            self.outputs['playlist'] = message
+            self.btn_open_output.setText(button_text)
+            self.btn_open_output.show()
+            self.playlist_url = url
+        self.output_label.setText("\n".join(self.outputs.values()))
+
+    def open_output(self):
+        QDesktopServices.openUrl(self.playlist_url)
 
     def toggle_all_selection(self, state):
-        checked = (state == 2)
-        for widget in self.item_widgets.values():
-            # If the item is currently visible, toggle it
-            if not widget.parentWidget().isHidden():
-                widget.chk.setChecked(checked)
+        checked = state != Qt.Unchecked.value
+        for widget in self.visible_widgets():
+            blocker = QSignalBlocker(widget.chk)
+            widget.chk.setChecked(checked)
         self.update_selection_metrics()
 
     def filter_tracks(self):
-        query = self.txt_search.text().lower()
+        query = self.txt_search.text().strip().lower()
         filter_type = self.combo_type.currentIndex()
         filter_role = self.combo_role.currentIndex()
         
@@ -439,14 +572,46 @@ class ResultsPage(QWidget):
         self.update_selection_metrics()
 
     def on_track_clicked(self, item):
+        if item is None:
+            return
         widget = self.track_list.itemWidget(item)
         if widget:
             track = widget.track
             art = self.artwork_cache.get(track.album_artwork_url, QImage())
             self.detail_panel.set_track(track, art)
+            if track.album_artwork_url and art.isNull():
+                self.artwork_requested.emit(track.album_artwork_url)
+
+    def request_visible_artwork(self):
+        if not self.isVisible() or not self.track_list.count():
+            return
+        first = max(0, self.track_list.indexAt(QPoint(8, 8)).row())
+        # Include a small margin below the viewport for smooth scrolling.
+        count = max(3, self.track_list.viewport().height() // 70 + 3)
+        urls = set()
+        shown = 0
+        for row in range(first, self.track_list.count()):
+            item = self.track_list.item(row)
+            if item.isHidden():
+                continue
+            widget = self.track_list.itemWidget(item)
+            url = widget.track.album_artwork_url if widget else None
+            if url and url not in self.artwork_cache:
+                urls.add(url)
+            shown += 1
+            if shown >= count:
+                break
+        for url in urls:
+            self.artwork_requested.emit(url)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.request_visible_artwork)
 
     def set_track_artwork(self, artwork_url: str, image: QImage):
         # Cache image
+        if len(self.artwork_cache) >= 256 and artwork_url not in self.artwork_cache:
+            self.artwork_cache.pop(next(iter(self.artwork_cache)))
         self.artwork_cache[artwork_url] = image
         
         # Propagate to visible rows
@@ -460,18 +625,33 @@ class ResultsPage(QWidget):
             self.detail_panel.set_track(self.detail_panel.current_track, image)
 
     def on_create_playlist_clicked(self):
-        selected_tracks = []
-        for widget in self.item_widgets.values():
-            if widget.chk.isChecked() and not widget.parentWidget().isHidden():
-                selected_tracks.append(widget.track)
-        self.create_playlist_requested.emit(selected_tracks)
+        if not self.busy and not self.loading and self.selected_tracks():
+            self.create_playlist_requested.emit(self.selected_tracks())
 
     def on_export_clicked(self):
-        selected_tracks = []
-        for widget in self.item_widgets.values():
-            if widget.chk.isChecked() and not widget.parentWidget().isHidden():
-                selected_tracks.append(widget.track)
-        self.export_json_requested.emit(selected_tracks)
+        if not self.busy and not self.loading and self.selected_tracks():
+            self.export_json_requested.emit(self.selected_tracks())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.detail_panel.setVisible(self.width() >= 1000)
+        self.btn_details.setVisible(self.width() < 1000)
+
+    def show_details(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Track details")
+        layout = QVBoxLayout(dialog)
+        panel = DetailPanel(dialog)
+        panel.clear()
+        if self.detail_panel.current_track:
+            track = self.detail_panel.current_track
+            panel.set_track(track, self.artwork_cache.get(track.album_artwork_url))
+        layout.addWidget(panel)
+        close = QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.resize(360, 620)
+        dialog.exec()
 
     def focus_search(self):
         self.txt_search.setFocus()

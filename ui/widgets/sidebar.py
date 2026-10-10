@@ -33,6 +33,7 @@ class NavButton(QPushButton):
                 color: {Theme.STRONG_TEXT};
                 font-weight: bold;
             }}
+            QPushButton:focus {{ border: 2px solid {Theme.SOFT_MINT}; }}
         """)
 
 class Sidebar(QFrame):
@@ -165,6 +166,10 @@ class Sidebar(QFrame):
         self.profile_layout.addWidget(self.name_label, 1, Qt.AlignVCenter)
         
         layout.addWidget(self.profile_widget)
+        self.status_label = QLabel("Not connected")
+        self.status_label.setWordWrap(True)
+        self.status_label.setTextFormat(Qt.PlainText)
+        layout.addWidget(self.status_label)
 
     def on_nav_clicked(self, selected_idx):
         for page_index, btn in zip(self.button_page_indexes, self.button_group):
@@ -183,6 +188,13 @@ class Sidebar(QFrame):
 
     def set_status(self, status: str):
         self.current_status = status.replace("Status:", "").strip()
+        self.status_label.setText(self.current_status)
+
+    def set_reduced_motion(self, enabled):
+        if enabled:
+            self.tip_timer.stop()
+        else:
+            self.tip_timer.start(9000)
 
     def update_tip(self):
         title, body = self.tips[self.tip_index]

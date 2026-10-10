@@ -30,9 +30,31 @@ class CircularVisualizer(QWidget):
         # Timer for 60 FPS animation (16ms)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_animation)
-        self.timer.start(16)
+        self.reduced_motion = False
         
         self.last_update = time.time()
+
+    def set_reduced_motion(self, enabled):
+        self.reduced_motion = enabled
+        self.pulse_intensity = self.collab_ripple = self.bloom_phase = 0.0
+        self.bar_values = [0.2] * self.num_bars
+        self.sync_timer()
+        self.update()
+
+    def sync_timer(self):
+        if self.isVisible() and not self.reduced_motion:
+            self.last_update = time.time()
+            self.timer.start(33)
+        else:
+            self.timer.stop()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.sync_timer()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
 
     def set_state(self, state: str):
         if state in ["idle", "scanning", "rate_limit", "error", "complete"]:
@@ -41,6 +63,9 @@ class CircularVisualizer(QWidget):
                 self.bloom_phase = 1.0
             elif state == "scanning":
                 self.bloom_phase = 0.0
+            if self.reduced_motion:
+                self.bloom_phase = 0.0
+            self.update()
 
     def set_artist_image(self, image: Optional[QImage]):
         self.artist_image = image
@@ -51,6 +76,8 @@ class CircularVisualizer(QWidget):
         self.update()
 
     def trigger_track_discovery(self, is_collab: bool = False):
+        if self.reduced_motion:
+            return
         self.pulse_intensity = 1.0
         if is_collab:
             self.collab_ripple = 1.0

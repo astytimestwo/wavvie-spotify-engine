@@ -3,7 +3,7 @@ import sys
 import argparse
 import logging
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from dotenv import dotenv_values
 
 from core.models import ScanConfiguration, ScanResult
 from core.spotify_service import SpotifyReleaseService
@@ -38,9 +38,20 @@ def dotenv_search_paths(base_dir=None, cwd=None, executable_path=None):
             seen.add(normalized)
     return paths
 
-def load_environment():
+_loaded_environment = {}
+
+def load_environment(refresh=False):
+    if refresh:
+        # Only refresh values this loader supplied; explicit process variables win.
+        for key, value in _loaded_environment.items():
+            if os.environ.get(key) == value:
+                os.environ.pop(key, None)
+        _loaded_environment.clear()
     for env_path in dotenv_search_paths():
-        load_dotenv(env_path, override=False)
+        for key, value in dotenv_values(env_path).items():
+            if value is not None and key not in os.environ:
+                os.environ[key] = value
+                _loaded_environment[key] = value
 
 # Load env variables before importing or checking configuration
 load_environment()
@@ -150,6 +161,10 @@ def run_cli(start_index: int, end_index: int, cutoff_date_str: str, refresh_cach
     playlist_result = service.create_playlist(scan_result.tracks, config, actual_start, actual_end)
     
     if playlist_result:
+        if playlist_result.error:
+            logger.error(f"Playlist is incomplete: {playlist_result.error}")
+            logger.info(f"Confirmed tracks added: {playlist_result.tracks_added}. Playlist URL: {playlist_result.playlist_url}")
+            return
         logger.info(f"✅ Success! Playlist '{playlist_result.playlist_name}' created with {playlist_result.tracks_added} tracks")
         logger.info(f"Playlist URL: {playlist_result.playlist_url}")
         

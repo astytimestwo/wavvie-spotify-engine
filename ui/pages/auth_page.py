@@ -15,7 +15,7 @@ class AuthPage(QWidget):
         self.is_connected = False
         
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(40, 60, 40, 60)
+        self.main_layout.setContentsMargins(24, 32, 24, 32)
         self.main_layout.setAlignment(Qt.AlignCenter)
         
         # 1. Logo area
@@ -27,7 +27,8 @@ class AuthPage(QWidget):
         self.main_layout.addWidget(self.logo_label, 0, Qt.AlignCenter)
         
         # 2. Heading
-        self.heading_label = QLabel("Your followed artists, filtered properly.")
+        self.heading_label = QLabel("New music from the artists you follow.")
+        self.heading_label.setWordWrap(True)
         self.heading_label.setAlignment(Qt.AlignCenter)
         self.heading_label.setStyleSheet(f"""
             color: {Theme.STRONG_TEXT};
@@ -39,7 +40,7 @@ class AuthPage(QWidget):
         self.main_layout.addWidget(self.heading_label)
         
         # 3. Subtitle / Explanation
-        self.sub_label = QLabel("Discover new albums, singles, EPs, and collaborations from artists you follow. Skip trashy compilations and ghost producer credits automatically.")
+        self.sub_label = QLabel("Discover releases and collaborations, review what you like, and collect them in a private Spotify playlist.")
         self.sub_label.setAlignment(Qt.AlignCenter)
         self.sub_label.setWordWrap(True)
         self.sub_label.setMaximumWidth(550)
@@ -66,7 +67,7 @@ class AuthPage(QWidget):
 
     def update_ui_state(self):
         # Refresh env variables
-        load_environment()
+        load_environment(refresh=True)
         
         client_id = os.getenv('SPOTIPY_CLIENT_ID')
         client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
@@ -76,7 +77,10 @@ class AuthPage(QWidget):
         for i in reversed(range(self.content_layout.count())): 
             widget = self.content_layout.itemAt(i).widget()
             if widget is not None:
+                self.content_layout.removeWidget(widget)
+                widget.hide()
                 widget.deleteLater()
+        self.btn_connect = None
                 
         if client_id and client_secret:
             # Credentials exist, show normal Connect button
@@ -108,7 +112,8 @@ class AuthPage(QWidget):
         
         self.content_layout.addWidget(self.btn_connect, 0, Qt.AlignCenter)
         
-        status_label = QLabel(f"Redirect URI status: Listening on {redirect_uri}")
+        status_label = QLabel("Sign in through Spotify in your browser. Return here when you're connected.")
+        status_label.setWordWrap(True)
         status_label.setStyleSheet(f"color: {Theme.SECONDARY_TEXT}; font-size: 12px; margin-top: 16px;")
         status_label.setAlignment(Qt.AlignCenter)
         self.content_layout.addWidget(status_label)
@@ -121,7 +126,7 @@ class AuthPage(QWidget):
     def show_setup_view(self, client_id, client_secret, redirect_uri):
         self.setup_card = QFrame()
         self.setup_card.setProperty("class", "card")
-        self.setup_card.setFixedWidth(550)
+        self.setup_card.setMaximumWidth(550)
         self.setup_card.setStyleSheet(f"""
             QFrame {{
                 background-color: {Theme.ELEVATED_SURFACE};
@@ -184,6 +189,8 @@ class AuthPage(QWidget):
             "SPOTIPY_CLIENT_SECRET='your_client_secret'\n"
             "SPOTIPY_REDIRECT_URI='http://127.0.0.1:8888/callback'"
         )
+        example_text.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        example_text.setWordWrap(True)
         example_text.setStyleSheet(f"font-family: {Theme.FONT_MONO}; font-size: 11px; color: {Theme.SECONDARY_TEXT};")
         example_layout.addWidget(example_text)
         

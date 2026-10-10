@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+import importlib
 from unittest.mock import MagicMock, patch
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +19,37 @@ from ui.pages.scan_page import ScanPage
 from ui.main_window import MainWindow
 
 class TestSpotifyReleaseService(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QApplication.instance() or QApplication([])
+
+    def make_window(self):
+        window = MainWindow.__new__(MainWindow)
+        window.operation = None
+        window._workers = {}
+        window.closing = False
+        window.scan_warnings = []
+        window.notice = MagicMock()
+        window.set_operation = MagicMock()
+        window.can_start_operation = MagicMock(return_value=True)
+        window.sidebar = MagicMock()
+        window.dashboard_page = MagicMock()
+        return window
+
     def setUp(self):
+        # Never read/write the user's real application preferences in unit tests.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        original_settings = QSettings
+        def settings_factory(*args, **kwargs):
+            return original_settings(str(Path(directory.name) / 'settings.ini'), original_settings.IniFormat)
+        for module_name in ('ui.main_window', 'ui.pages.settings_page', 'ui.pages.dashboard_page'):
+            patcher = patch.object(importlib.import_module(module_name), 'QSettings', settings_factory)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch(__name__ + '.QSettings', settings_factory)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.service = SpotifyReleaseService(
             client_id="mock_id",
             client_secret="mock_secret",
@@ -163,7 +195,7 @@ class TestSpotifyReleaseService(unittest.TestCase):
         settings.setValue("auto_export_json", False)
         settings.setValue("auto_create_playlist", False)
 
-        window = MainWindow.__new__(MainWindow)
+        window = self.make_window()
         window.scan_page = MagicMock()
 
         MainWindow.apply_preferences(window)
@@ -172,7 +204,7 @@ class TestSpotifyReleaseService(unittest.TestCase):
         window.scan_page.chk_create_playlist.setChecked.assert_called_once_with(False)
 
     def test_scan_completion_runs_enabled_automatic_actions(self):
-        window = MainWindow.__new__(MainWindow)
+        window = self.make_window()
         window.scan_page = MagicMock()
         window.results_page = MagicMock()
         window.dashboard_page = MagicMock()
@@ -242,7 +274,7 @@ class TestSpotifyReleaseService(unittest.TestCase):
         settings.setValue("last_scan_start_idx", 50)
         settings.setValue("last_scan_end_idx", 9999)
 
-        window = MainWindow.__new__(MainWindow)
+        window = self.make_window()
         window.scan_page = MagicMock()
         window.results_page = MagicMock()
         window.dashboard_page = MagicMock()
@@ -264,11 +296,12 @@ class TestSpotifyReleaseService(unittest.TestCase):
         self.assertEqual(settings.value("last_scan_end_idx", type=int), 100)
 
     def test_quick_start_stays_on_home_and_marks_origin(self):
-        window = MainWindow.__new__(MainWindow)
+        window = self.make_window()
         window.scan_origin = None
         window.switch_page = MagicMock()
         window.apply_preferences = MagicMock()
         window.scan_page = MagicMock()
+        window.scan_page.on_start_clicked.side_effect = lambda: setattr(window, "operation", "scan")
 
         MainWindow.quick_start_scan(window)
 
@@ -298,7 +331,7 @@ class TestSpotifyReleaseService(unittest.TestCase):
         self.assertEqual(scan_page.lbl_current_artist.text(), "")
 
     def test_scan_progress_updates_home_and_scan_pages(self):
-        window = MainWindow.__new__(MainWindow)
+        window = self.make_window()
         window.scan_page = MagicMock()
         window.dashboard_page = MagicMock()
         progress = ScanProgress(
@@ -330,7 +363,7 @@ class TestSpotifyReleaseService(unittest.TestCase):
             error=MagicMock(),
         )
         mock_scan_worker.return_value = worker
-        window = MainWindow.__new__(MainWindow)
+        window = self.make_window()
         window.scan_origin = "home"
         window.scan_page = MagicMock()
         window.dashboard_page = MagicMock()

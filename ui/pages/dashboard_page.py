@@ -26,6 +26,8 @@ class DashboardPage(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         
         self.welcome_label = QLabel("Welcome back!")
+        self.welcome_label.setWordWrap(True)
+        self.welcome_label.setTextFormat(Qt.PlainText)
         self.welcome_label.setProperty("class", "heading")
         self.welcome_label.setStyleSheet("font-size: 32px; font-family: Loubag;")
         header_layout.addWidget(self.welcome_label)
@@ -47,6 +49,9 @@ class DashboardPage(QWidget):
         header_layout.addWidget(self.btn_view_results)
         
         layout.addWidget(header_widget)
+        self.quick_summary = QLabel("Quick Scan uses your saved preferences.")
+        self.quick_summary.setWordWrap(True)
+        layout.addWidget(self.quick_summary)
         
         # 2. Stats Grid
         self.stats_frame = QWidget()
@@ -159,9 +164,9 @@ class DashboardPage(QWidget):
 
     def update_user_info(self, display_name: str):
         if display_name:
-            self.welcome_label.setText(f"Good morning, {display_name}")
+            self.welcome_label.setText(f"Welcome back, {display_name}")
         else:
-            self.welcome_label.setText("Good morning")
+            self.welcome_label.setText("Discover your next listen")
 
     def update_followed_artists_count(self, count: int):
         self.card_artists.set_value(str(count))
@@ -189,6 +194,8 @@ class DashboardPage(QWidget):
         self.btn_quick.setEnabled(False)
         self.btn_view_results.hide()
         self.btn_cancel_scan.show()
+        self.btn_cancel_scan.setEnabled(True)
+        self.btn_cancel_scan.setText("Cancel Scan")
         self.pulse_subtitle.setText("Running")
         self.visualizer.set_state("scanning")
         self.visualizer.set_progress(0.0)
@@ -238,7 +245,16 @@ class DashboardPage(QWidget):
         self.lbl_scan_artist.setText("")
         self.add_scan_log_line("Scan cancelled.", Theme.ERROR)
 
+    def show_scan_cancelling(self):
+        self.scan_state = "cancelling"
+        self.btn_quick.setEnabled(False)
+        self.btn_cancel_scan.setEnabled(False)
+        self.btn_cancel_scan.setText("Cancelling…")
+        self.pulse_subtitle.setText("Waiting for current requests to finish")
+
     def update_scan_progress(self, progress: ScanProgress):
+        if self.scan_state == "cancelling":
+            return
         total = progress.total_artists
         processed = progress.processed_artists
         percentage = int((processed / total) * 100) if total > 0 else 0
@@ -292,3 +308,5 @@ class StatCard(QFrame):
 
     def set_value(self, value: str):
         self.val_lbl.setText(value)
+        self.val_lbl.setWordWrap(True)
+        self.val_lbl.setStyleSheet(f"color: {Theme.STRONG_TEXT}; font-size: {18 if len(value) > 10 else 32}px; font-weight: bold;")

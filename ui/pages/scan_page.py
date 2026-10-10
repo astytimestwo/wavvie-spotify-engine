@@ -31,12 +31,16 @@ class ScanPage(QWidget):
         main_layout.addWidget(self.stacked_widget)
         
         self.total_artists_available = 0
+        self.btn_start.setEnabled(False)
 
     def set_total_artists(self, count: int):
         self.total_artists_available = count
         self.lbl_artists_count.setText(f"Followed artists found: {count}")
         self.spin_end.setMaximum(max(1, count))
         self.spin_end.setValue(count)
+        self.spin_start.setMaximum(max(1, count))
+        self.btn_start.setEnabled(count > 0)
+        self.lbl_validation.setText("" if count else "Follow some artists in Spotify, then refresh your artist list in Settings.")
 
     def init_config_view(self):
         self.config_widget = QWidget()
@@ -65,6 +69,9 @@ class ScanPage(QWidget):
         grid.addWidget(QLabel("Cutoff Date:"), 0, 0)
         self.date_cutoff = QDateEdit()
         self.date_cutoff.setCalendarPopup(True)
+        self.date_cutoff.setDisplayFormat("dd MMM yyyy")
+        self.date_cutoff.setMaximumDate(QDate.currentDate())
+        self.date_cutoff.setAccessibleName("Include releases on or after")
         # Default to 30 days ago
         default_date = QDate.currentDate().addDays(-30)
         self.date_cutoff.setDate(default_date)
@@ -87,11 +94,13 @@ class ScanPage(QWidget):
         grid.addWidget(self.spin_end, 2, 1)
         
         # Row 3: Concurrency
-        grid.addWidget(QLabel("Concurrency Workers:"), 3, 0)
+        grid.addWidget(QLabel("Scan speed:"), 3, 0)
         self.spin_workers = QSpinBox()
         self.spin_workers.setMinimum(1)
         self.spin_workers.setMaximum(20)
         self.spin_workers.setValue(5)
+        self.spin_workers.setToolTip("Parallel artists. Lower this if Spotify frequently asks you to wait. Default: 5.")
+        self.spin_workers.setAccessibleName("Parallel artists")
         grid.addWidget(self.spin_workers, 3, 1)
         
         # Row 4: Playlist Name
@@ -107,7 +116,7 @@ class ScanPage(QWidget):
         grid.addWidget(self.txt_playlist_desc, 5, 1)
         
         # Row 6: Toggles
-        toggles_layout = QHBoxLayout()
+        toggles_layout = QVBoxLayout()
         self.chk_refresh = QCheckBox("Refresh Artist Cache")
         self.chk_export = QCheckBox("Export JSON After Scan")
         self.chk_export.setChecked(True)
@@ -120,6 +129,13 @@ class ScanPage(QWidget):
         grid.addLayout(toggles_layout, 6, 0, 1, 2)
         
         layout.addWidget(config_card)
+        hint = QLabel("Artist numbers follow alphabetical order. The start and end artists are both included. Playlists are private.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.lbl_validation = QLabel("")
+        self.lbl_validation.setWordWrap(True)
+        self.lbl_validation.setStyleSheet(f"color: {Theme.WARNING};")
+        layout.addWidget(self.lbl_validation)
         
         # Start button
         self.btn_start = QPushButton("Start Release Scan")
@@ -222,7 +238,7 @@ class ScanPage(QWidget):
             start_index=self.spin_start.value(),
             end_index=self.spin_end.value(),
             cutoff_date_str=self.date_cutoff.date().toString("yyyy-MM-dd"),
-            playlist_name=self.txt_playlist_name.text(),
+            playlist_name=self.txt_playlist_name.text().strip(),
             playlist_description=self.txt_playlist_desc.text(),
             worker_count=self.spin_workers.value(),
             export_json=self.chk_export.isChecked(),
@@ -230,11 +246,18 @@ class ScanPage(QWidget):
             refresh_cache=self.chk_refresh.isChecked()
         )
         
-        # Check validation
-        if not config.playlist_name and config.create_playlist_auto:
-            # Simple fallback validation
+        if not self.total_artists_available:
+            self.lbl_validation.setText("Your artist list is not ready. Refresh it in Settings and try again.")
             return
-            
+        if config.end_index < config.start_index:
+            self.lbl_validation.setText("End artist must be at or after the start artist.")
+            self.spin_end.setFocus()
+            return
+        if not config.playlist_name and config.create_playlist_auto:
+            self.lbl_validation.setText("Enter a playlist name or turn off automatic playlist creation.")
+            self.txt_playlist_name.setFocus()
+            return
+        self.lbl_validation.clear()
         self.start_scan_requested.emit(config)
 
     def show_config(self):
@@ -242,6 +265,9 @@ class ScanPage(QWidget):
         self.visualizer.set_state("idle")
 
     def show_active(self):
+        self.btn_cancel.setEnabled(True)
+        self.btn_cancel.setText("Cancel Scan")
+        self.lbl_status.setText("Discovering releases…")
         self.stacked_widget.setCurrentIndex(1)
         self.log_list.clear()
         self.progress_bar.setValue(0)
@@ -255,6 +281,8 @@ class ScanPage(QWidget):
         self.log_list.addItem(item)
         if color_hex:
             self.log_list.item(self.log_list.count() - 1).setForeground(QColor(color_hex))
+        while self.log_list.count() > 500:
+            self.log_list.takeItem(0)
         self.log_list.scrollToBottom()
 
     def update_scan_progress(self, progress: ScanProgress):

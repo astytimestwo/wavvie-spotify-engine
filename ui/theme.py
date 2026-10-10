@@ -9,7 +9,7 @@ class Theme:
     
     STRONG_TEXT = "#F5F7FA"
     SECONDARY_TEXT = "#A1AAB8"
-    MUTED_TEXT = "#687384"
+    MUTED_TEXT = "#929EAF"
     
     SPOTIFY_GREEN = "#1ED760"
     SPOTIFY_HOVER = "#35E477"
@@ -153,7 +153,7 @@ class Theme:
             QPushButton[class="accent"] {{
                 background-color: {cls.VIOLET_ACCENT};
                 border: 1px solid {cls.VIOLET_ACCENT};
-                color: {cls.STRONG_TEXT};
+                color: {cls.APP_BG};
                 font-weight: bold;
                 border-radius: 16px;
             }}
@@ -212,4 +212,37 @@ class Theme:
                 background-color: {cls.MAIN_CANVAS};
                 border-radius: 26px;
             }}
+
+            QComboBox {{
+                background: {cls.SECONDARY_SURFACE};
+                color: {cls.STRONG_TEXT};
+                border: 1px solid {cls.BORDER};
+                border-radius: 12px;
+                padding: 10px 12px;
+            }}
+            QComboBox QAbstractItemView, QCalendarWidget QAbstractItemView, QMenu {{
+                background: {cls.ELEVATED_SURFACE};
+                color: {cls.STRONG_TEXT};
+                selection-background-color: {cls.HOVER_SURFACE};
+                selection-color: {cls.STRONG_TEXT};
+                border: 1px solid {cls.BORDER};
+            }}
+            QPushButton:focus, QComboBox:focus {{
+                border: 2px solid {cls.SOFT_MINT};
+            }}
+            QCheckBox:focus {{ color: {cls.STRONG_TEXT}; }}
+            QCheckBox::indicator:focus {{ border: 2px solid {cls.SOFT_MINT}; }}
+            QPushButton:disabled, QPushButton[class="primary"]:disabled,
+            QPushButton[class="accent"]:disabled, QPushButton[class="danger"]:disabled {{
+                background: {cls.ELEVATED_SURFACE};
+                color: {cls.MUTED_TEXT};
+                border: 1px solid {cls.BORDER};
+            }}
+            QLineEdit:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {cls.MUTED_TEXT}; }}
+            QToolTip {{
+                background: {cls.ELEVATED_SURFACE}; color: {cls.STRONG_TEXT};
+                border: 1px solid {cls.BORDER}; padding: 8px;
+            }}
+            QScrollArea {{ border: none; }}
+            QSplitter::handle {{ background: {cls.BORDER}; width: 1px; }}
         """

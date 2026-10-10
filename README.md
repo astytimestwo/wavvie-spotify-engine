@@ -85,6 +85,29 @@ Double-click **`run.bat`**. This will:
 
 Do not commit `.env`, `.spotifycache`, `followed_artists_cache.json`, `tracklist_*.json`, `build/`, `dist/`, or `__pycache__/`.
 
+## Desktop behavior
+
+- Quick Scan uses your saved date and output preferences for all followed artists. Custom scans let you choose an alphabetical artist range.
+- Only one Spotify operation runs at a time. You can navigate while scanning; cancellation waits for current requests to finish.
+- Results explain empty scans and unmatched searches. Selection counts, export, and playlist creation use checked tracks visible under the current filters.
+- Manual export opens a save dialog. Completed exports and playlists have persistent links on Results. Partial playlist failures show the confirmed count and a link to check Spotify before retrying.
+- Settings save automatically, and reduced motion disables the release animation and rotating tips. Ctrl+F opens Results search; Ctrl+L opens Activity.
+- Large result sets load in small batches. Artwork loads for visible rows, keeping background work and image caches bounded.
+
+## Development checks
+
+```bash
+python -m unittest discover -s tests -v
+python -m compileall -q app.py main.py core ui tests
+git diff --check
+```
+
+The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary INI preferences, and mocked Spotify responses. It covers real widget interactions, worker completion, cancellation, shutdown, settings, outputs, long text, large results, and layouts at 1000×640, 1280×820, and 1600×1000. No account credentials or real playlists are needed. Temporary-file creation and cleanup must be permitted by the execution environment.
+
+Validation on 2026-09-06: **50 tests passed**, plus the layout test at **150% display scaling**. The 1,000-track check produced its first 50 rows in 0.10 seconds and finished loading in 2.33 seconds while yielding between batches. These timings describe the local test machine, not a universal performance guarantee. Live Spotify integration and packaged executable behavior were not revalidated in this UI pass.
+
+See [mindmap.md](mindmap.md) for the implementation map, data flow, and remaining integration boundaries. The legacy web UI prompt is separate from this native desktop implementation.
+
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

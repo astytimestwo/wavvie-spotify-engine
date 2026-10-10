@@ -1,4 +1,5 @@
 import spotipy
+import requests
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.exceptions import SpotifyException
 from datetime import datetime, timedelta
@@ -16,13 +17,14 @@ logger = logging.getLogger(__name__)
 
 class SpotifyReleaseService:
     def __init__(self, client_id: Optional[str] = None, client_secret: Optional[str] = None, 
-                 redirect_uri: str = 'http://127.0.0.1:8888/callback', cache_path: str = ".spotifycache"):
+                 redirect_uri: Optional[str] = None, cache_path: str = ".spotifycache"):
         self.client_id = client_id or os.getenv('SPOTIPY_CLIENT_ID')
         self.client_secret = client_secret or os.getenv('SPOTIPY_CLIENT_SECRET')
         self.redirect_uri = redirect_uri or os.getenv('SPOTIPY_REDIRECT_URI', 'http://127.0.0.1:8888/callback')
         self.cache_path = cache_path
         
         self.sp: Optional[spotipy.Spotify] = None
+        self.http_session = None
         self.user_data: Optional[Dict[str, Any]] = None
         self.cancelled = False
         
@@ -61,25 +63,43 @@ class SpotifyReleaseService:
                 scope='user-follow-read playlist-modify-private',
                 cache_path=self.cache_path
             )
-            self.sp = spotipy.Spotify(auth_manager=auth_manager)
+            # A plain requests session does not retry POSTs behind our back.
+            # safe_api_call owns retry policy and can distinguish reads from writes.
+            if self.http_session:
+                self.http_session.close()
+            self.http_session = requests.Session()
+            self.sp = spotipy.Spotify(auth_manager=auth_manager, requests_session=self.http_session)
             self.user_data = self.sp.current_user()
             self.trigger_callback("auth_success", self.user_data)
             return True
         except Exception as e:
+            self.sp = None
+            self.user_data = None
+            if self.http_session:
+                self.http_session.close()
             self.trigger_callback("auth_failed", str(e))
             return False
 
     def disconnect(self):
+        if self.http_session:
+            self.http_session.close()
+            self.http_session = None
         self.sp = None
         self.user_data = None
+        self.cancelled = False
         if os.path.exists(self.cache_path):
             try:
                 os.remove(self.cache_path)
             except Exception as e:
                 logger.warning(f"Could not delete cache file: {e}")
+        try:
+            self.clear_artists_cache()
+        except OSError as error:
+            logger.warning(f"Could not clear artist cache: {error}")
 
     def safe_api_call(self, func, *args, **kwargs):
         """Wrapper for API calls with proper error handling and rate limiting."""
+        retry_uncertain = kwargs.pop("_retry_uncertain", True)
         for attempt in range(self.max_retries):
             if self.cancelled:
                 raise InterruptedError("Operation cancelled by user.")
@@ -102,6 +122,8 @@ class SpotifyReleaseService:
                         time.sleep(1)
                     continue
                 elif e.http_status >= 500:
+                    if not retry_uncertain:
+                        raise
                     wait_time = (2 ** attempt) * 2
                     logger.warning(f"Server error {e.http_status}. Retrying in {wait_time}s... (attempt {attempt + 1})")
                     self.trigger_callback("warning", f"Spotify Server Error {e.http_status}. Retrying...")
@@ -112,7 +134,7 @@ class SpotifyReleaseService:
                     raise
             except Exception as e:
                 logger.error(f"Unexpected error: {e}")
-                if attempt == self.max_retries - 1:
+                if not retry_uncertain or attempt == self.max_retries - 1:
                     raise
                 time.sleep(2 ** attempt)
         
@@ -158,8 +180,10 @@ class SpotifyReleaseService:
             except Exception as e:
                 logger.error(f"Error fetching artists: {e}")
                 self.trigger_callback("warning", f"Failed to fetch some followed artists: {e}")
-                break
+                raise
         
+        if self.cancelled:
+            raise InterruptedError("Loading artists was cancelled.")
         return artists
 
     def get_and_cache_followed_artists(self, cache_file: str = "followed_artists_cache.json", refresh: bool = False) -> List[Dict[str, Any]]:
@@ -167,12 +191,18 @@ class SpotifyReleaseService:
             try:
                 with open(cache_file, 'r', encoding='utf-8') as f:
                     cached_data = json.load(f)
+                    user_id = (self.user_data or {}).get('id')
+                    if not isinstance(cached_data, dict) or cached_data.get('user_id') != user_id:
+                        raise ValueError("Artist cache belongs to another account or an older app version")
+                    cached_data = cached_data['artists']
+                    if not isinstance(cached_data, list):
+                        raise ValueError("Invalid artist cache")
                     logger.info(f"Loaded {len(cached_data)} artists from cache")
                     self.trigger_callback("artists_loaded", cached_data)
                     return cached_data
             except Exception as e:
                 logger.warning(f"Cache file corrupted ({e}), fetching fresh data")
-                self.trigger_callback("warning", "Cache file corrupted, fetching fresh followed artists.")
+                logger.info("Fetching a fresh artist list.")
         
         artists = self.get_followed_artists()
         artists.sort(key=lambda x: x.get('name', '').lower())
@@ -180,7 +210,7 @@ class SpotifyReleaseService:
         
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
-                json.dump(artists, f, indent=2, ensure_ascii=False)
+                json.dump({'user_id': (self.user_data or {}).get('id'), 'artists': artists}, f, indent=2, ensure_ascii=False)
             logger.info(f"Cached {len(artists)} artists for future runs")
         except Exception as e:
             logger.warning(f"Could not cache artists: {e}")
@@ -349,6 +379,7 @@ class SpotifyReleaseService:
                 
             except Exception as e:
                 logger.error(f"Error fetching albums at offset {offset} for {artist_name}: {e}")
+                self.trigger_callback("warning", f"Some releases for {artist_name} could not be loaded: {e}")
                 consecutive_empty_pages += 1
                 if consecutive_empty_pages >= max_consecutive_empty:
                     break
@@ -445,6 +476,7 @@ class SpotifyReleaseService:
                             break
                     except Exception as e:
                         logger.warning(f"Error in collab search: {e}")
+                        self.trigger_callback("warning", f"Some collaborations for {artist_name} could not be checked: {e}")
                         break
         except Exception as e:
             logger.error(f"Error searching collaborations for {artist_name}: {e}")
@@ -488,6 +520,9 @@ class SpotifyReleaseService:
     def scan_releases(self, config: ScanConfiguration) -> Optional[ScanResult]:
         self.cancelled = False
         self.trigger_callback("scan_started")
+        if config.start_index < 1 or config.end_index < config.start_index or not 1 <= config.worker_count <= 20:
+            self.trigger_callback("fatal_error", "Choose a valid artist range and a scan speed between 1 and 20.")
+            return None
         
         if self.sp is None:
             if not self.authenticate():
@@ -517,6 +552,7 @@ class SpotifyReleaseService:
             global_seen = {}
             processed_count = 0
             collaborations_count = 0
+            duplicates_count = 0
             
             start_time = time.time()
             
@@ -580,6 +616,7 @@ class SpotifyReleaseService:
                                     
                                 self.trigger_callback("track_discovered", track)
                             else:
+                                duplicates_count += 1
                                 self.trigger_callback("duplicate_prevented", track.track_name, global_seen[sig].artist_name)
                                 
                         # Trigger progress update
@@ -608,7 +645,6 @@ class SpotifyReleaseService:
             all_tracks.sort(key=lambda x: x.release_date, reverse=True)
             
             # Prepare result
-            duplicates_count = len(global_seen) - len(all_tracks)
             result = ScanResult(
                 tracks=all_tracks,
                 duplicates_prevented=duplicates_count,
@@ -626,7 +662,7 @@ class SpotifyReleaseService:
             self.trigger_callback("fatal_error", f"Scan process encountered a fatal error: {e}")
             return None
 
-    def dump_tracklist_to_json(self, tracks: List[Track], start_index: int, end_index: int) -> Optional[str]:
+    def dump_tracklist_to_json(self, tracks: List[Track], start_index: int, end_index: int, output_path: Optional[str] = None) -> Optional[str]:
         try:
             clean_tracks = []
             missing_artwork = 0
@@ -648,7 +684,7 @@ class SpotifyReleaseService:
                     'track_signature': t.track_signature
                 })
             
-            filename = f"tracklist_{start_index}_{end_index}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            filename = output_path or f"tracklist_{start_index}_{end_index}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
             export_data = {
                 'metadata': {
                     'total_tracks': len(tracks),
@@ -673,6 +709,12 @@ class SpotifyReleaseService:
             self.trigger_callback("warning", "No tracks to add to playlist.")
             return None
             
+        playlist = None
+        tracks_added = 0
+        track_ids = list(dict.fromkeys(t.track_id for t in tracks if t.track_id))
+        if not track_ids:
+            self.trigger_callback("warning", "No valid tracks selected.")
+            return None
         try:
             range_suffix = f" (Artists {start_index}-{end_index})" if start_index != 1 or end_index != 9999 else ""
             playlist_name = config.playlist_name + range_suffix
@@ -684,25 +726,22 @@ class SpotifyReleaseService:
                 user=user_id,
                 name=playlist_name,
                 public=False,
-                description=f"{config.playlist_description} - Range: {start_index}-{end_index}"
+                description=f"{config.playlist_description} - Range: {start_index}-{end_index}",
+                _retry_uncertain=False
             )
             playlist_id = playlist['id']
             playlist_url = playlist['external_urls']['spotify']
             
             logger.info(f"Created playlist: {playlist_name}")
             
-            track_ids = [t.track_id for t in tracks if t.track_id]
-            if not track_ids:
-                self.trigger_callback("warning", "No valid track IDs found for playlist.")
-                return None
-                
             # Add tracks in batches
             batches_completed = 0
             for i in range(0, len(track_ids), self.max_tracks_per_batch):
                 if self.cancelled:
                     break
                 batch = track_ids[i:i + self.max_tracks_per_batch]
-                self.safe_api_call(self.sp.playlist_add_items, playlist_id, batch)
+                self.safe_api_call(self.sp.playlist_add_items, playlist_id, batch, _retry_uncertain=False)
+                tracks_added += len(batch)
                 batches_completed += 1
                 self.trigger_callback("playlist_batch_completed", batches_completed, (len(track_ids) - 1) // self.max_tracks_per_batch + 1)
                 
@@ -713,7 +752,8 @@ class SpotifyReleaseService:
                 playlist_name=playlist_name,
                 playlist_id=playlist_id,
                 playlist_url=playlist_url,
-                tracks_added=len(track_ids)
+                tracks_added=tracks_added,
+                error="Cancelled before all tracks were added." if self.cancelled else None
             )
             self.trigger_callback("playlist_completed", result)
             return result
@@ -721,6 +761,9 @@ class SpotifyReleaseService:
         except Exception as e:
             logger.error(f"Playlist creation failed: {e}")
             self.trigger_callback("warning", f"Playlist creation failed: {e}")
+            if playlist:
+                return PlaylistResult(playlist_name, playlist['id'], playlist['external_urls']['spotify'],
+                                      tracks_added, error=f"{e}. The last request may have reached Spotify; check the playlist before retrying.")
             return None
 
     def cancel_scan(self):

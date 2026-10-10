@@ -1,38 +1,55 @@
-from PySide6.QtCore import QObject, Signal, QRunnable
-from core.models import ScanConfiguration
+"""Qt adapters. One terminal signal per job, after callbacks are detached."""
+from contextlib import contextmanager
+import urllib.request
+from PySide6.QtCore import QObject, Signal, QRunnable, Qt
+from PySide6.QtGui import QImage
 
 class WorkerSignals(QObject):
     started = Signal()
     finished = Signal(object)
     error = Signal(str)
-    progress = Signal(object)  # Tuples like (type, data)
+    progress = Signal(object)
     warning = Signal(str)
     rate_limit = Signal(int)
     batch_completed = Signal(int, int)
-    artist_started = Signal(int, str, str)  # index, name, image_url
-    artist_scanned = Signal(int, str, int)  # index, name, tracks_found
-    track_discovered = Signal(object)      # Track dataclass
-    duplicate_prevented = Signal(str, str) # track_name, original_artist
+    artist_started = Signal(int, str, str)
+    artist_scanned = Signal(int, str, int)
+    track_discovered = Signal(object)
+    duplicate_prevented = Signal(str, str)
+
+@contextmanager
+def callbacks(service, bindings):
+    previous = {key: service.callbacks.get(key) for key in bindings}
+    for key, callback in bindings.items():
+        service.register_callback(key, callback)
+    try:
+        yield
+    finally:
+        for key, callback in bindings.items():
+            if service.callbacks.get(key) is callback:
+                if previous[key] is None:
+                    service.callbacks.pop(key, None)
+                else:
+                    service.callbacks[key] = previous[key]
 
 class AuthWorker(QRunnable):
     def __init__(self, service):
         super().__init__()
         self.service = service
         self.signals = WorkerSignals()
-        
+
     def run(self):
-        self.service.register_callback("auth_started", lambda: self.signals.started.emit())
-        self.service.register_callback("auth_success", lambda user: self.signals.finished.emit(user))
-        self.service.register_callback("auth_failed", lambda err: self.signals.error.emit(err))
-        
+        errors = []
+        self.signals.started.emit()
         try:
-            success = self.service.authenticate()
-            if not success:
-                # If authenticate() returns False without trigger_callback, we emit error
-                if not self.service.sp:
-                    self.signals.error.emit("Spotify authentication failed.")
-        except Exception as e:
-            self.signals.error.emit(str(e))
+            with callbacks(self.service, {"auth_failed": errors.append}):
+                success = self.service.authenticate()
+            if success:
+                self.signals.finished.emit(self.service.user_data)
+            else:
+                self.signals.error.emit(errors[-1] if errors else "Spotify authentication failed.")
+        except Exception as error:
+            self.signals.error.emit(str(error))
 
 class LoadArtistsWorker(QRunnable):
     def __init__(self, service, refresh=False):
@@ -40,16 +57,15 @@ class LoadArtistsWorker(QRunnable):
         self.service = service
         self.refresh = refresh
         self.signals = WorkerSignals()
-        
+
     def run(self):
         self.signals.started.emit()
-        self.service.register_callback("artists_loaded", lambda artists: self.signals.finished.emit(artists))
-        self.service.register_callback("warning", lambda msg: self.signals.warning.emit(msg))
-        
         try:
-            self.service.get_and_cache_followed_artists(refresh=self.refresh)
-        except Exception as e:
-            self.signals.error.emit(str(e))
+            with callbacks(self.service, {"warning": self.signals.warning.emit}):
+                artists = self.service.get_and_cache_followed_artists(refresh=self.refresh)
+            self.signals.finished.emit(artists)
+        except Exception as error:
+            self.signals.error.emit(str(error))
 
 class ScanWorker(QRunnable):
     def __init__(self, service, config):
@@ -57,29 +73,30 @@ class ScanWorker(QRunnable):
         self.service = service
         self.config = config
         self.signals = WorkerSignals()
-        
+
     def run(self):
-        self.service.register_callback("scan_started", lambda: self.signals.started.emit())
-        self.service.register_callback("artist_scanning_started", lambda idx, name, img: self.signals.artist_started.emit(idx, name, img or ""))
-        self.service.register_callback("artist_scanning_completed", lambda idx, name, count: self.signals.artist_scanned.emit(idx, name, count))
-        self.service.register_callback("track_discovered", lambda track: self.signals.track_discovered.emit(track))
-        self.service.register_callback("duplicate_prevented", lambda name, orig: self.signals.duplicate_prevented.emit(name, orig))
-        self.service.register_callback("rate_limit_encountered", lambda sec: self.signals.rate_limit.emit(sec))
-        self.service.register_callback("warning", lambda msg: self.signals.warning.emit(msg))
-        self.service.register_callback("progress_changed", lambda prog: self.signals.progress.emit(("progress", prog)))
-        self.service.register_callback("fatal_error", lambda err: self.signals.error.emit(err))
-        
+        errors = []
+        bindings = {
+            "artist_scanning_started": lambda idx, name, img: self.signals.artist_started.emit(idx, name, img or ""),
+            "artist_scanning_completed": self.signals.artist_scanned.emit,
+            "track_discovered": self.signals.track_discovered.emit,
+            "duplicate_prevented": self.signals.duplicate_prevented.emit,
+            "rate_limit_encountered": self.signals.rate_limit.emit,
+            "warning": self.signals.warning.emit,
+            "progress_changed": lambda progress: self.signals.progress.emit(("progress", progress)),
+            "fatal_error": errors.append,
+        }
+        self.signals.started.emit()
         try:
-            result = self.service.scan_releases(self.config)
-            if result:
+            with callbacks(self.service, bindings):
+                result = self.service.scan_releases(self.config)
+            if result is not None:
                 self.signals.finished.emit(result)
             else:
-                if self.service.cancelled:
-                    self.signals.error.emit("Scan cancelled by user.")
-                else:
-                    self.signals.error.emit("Scan failed.")
-        except Exception as e:
-            self.signals.error.emit(str(e))
+                message = "Scan cancelled by user." if self.service.cancelled else (errors[-1] if errors else "Scan failed.")
+                self.signals.error.emit(message)
+        except Exception as error:
+            self.signals.error.emit(str(error))
 
 class PlaylistWorker(QRunnable):
     def __init__(self, service, tracks, config, start_idx, end_idx):
@@ -90,43 +107,35 @@ class PlaylistWorker(QRunnable):
         self.start_idx = start_idx
         self.end_idx = end_idx
         self.signals = WorkerSignals()
-        
+
     def run(self):
-        self.service.register_callback("playlist_started", lambda: self.signals.started.emit())
-        self.service.register_callback("playlist_batch_completed", lambda completed, total: self.signals.batch_completed.emit(completed, total))
-        self.service.register_callback("warning", lambda msg: self.signals.warning.emit(msg))
-        
+        errors = []
+        self.signals.started.emit()
         try:
-            result = self.service.create_playlist(self.tracks, self.config, self.start_idx, self.end_idx)
-            if result:
+            with callbacks(self.service, {"playlist_batch_completed": self.signals.batch_completed.emit, "warning": errors.append}):
+                result = self.service.create_playlist(self.tracks, self.config, self.start_idx, self.end_idx)
+            if result is not None:
                 self.signals.finished.emit(result)
             else:
-                self.signals.error.emit("Playlist creation failed.")
-        except Exception as e:
-            self.signals.error.emit(str(e))
-
-import urllib.request
-from PySide6.QtGui import QImage
+                self.signals.error.emit(errors[-1] if errors else "Playlist creation failed.")
+        except Exception as error:
+            self.signals.error.emit(str(error))
 
 class ImageLoadWorker(QRunnable):
-    def __init__(self, url: str, target_size: int = 200):
+    def __init__(self, url, target_size=200):
         super().__init__()
         self.url = url
         self.target_size = target_size
         self.signals = WorkerSignals()
-        
+
     def run(self):
         try:
-            req = urllib.request.Request(self.url, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = response.read()
-                
-            img = QImage()
-            if img.loadFromData(data):
-                # Crop/scale to limit dimensions
-                img = img.scaled(self.target_size, self.target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                self.signals.finished.emit(img)
-            else:
-                self.signals.error.emit("Failed to parse image data.")
-        except Exception as e:
-            self.signals.error.emit(str(e))
+            request = urllib.request.Request(self.url, headers={"User-Agent": "wavvie"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                data = response.read(10 * 1024 * 1024)
+            image = QImage()
+            if not image.loadFromData(data):
+                raise ValueError("Artwork could not be decoded.")
+            self.signals.finished.emit(image.scaled(self.target_size, self.target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        except Exception as error:
+            self.signals.error.emit(str(error))
