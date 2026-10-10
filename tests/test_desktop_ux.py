@@ -423,7 +423,7 @@ class WorkerAndServiceUXTests(unittest.TestCase):
         self.assertEqual(result.duplicates_prevented, 1)
 
     def test_partial_playlist_preserves_link_and_confirmed_count(self):
-        self.service.sp.user_playlist_create.return_value = {'id': 'p', 'external_urls': {'spotify': 'https://open.spotify.com/playlist/p'}}
+        self.service.sp.current_user_playlist_create.return_value = {'id': 'p', 'external_urls': {'spotify': 'https://open.spotify.com/playlist/p'}}
         self.service.sp.playlist_add_items.side_effect = [None, RuntimeError('Connection lost')]
         result = self.service.create_playlist([track(i) for i in range(150)], ScanConfiguration(), 1, 5)
         self.assertEqual(result.tracks_added, 100)
@@ -472,7 +472,7 @@ class WorkerAndServiceUXTests(unittest.TestCase):
                 self.assertEqual(os.environ['SPOTIPY_CLIENT_SECRET'], 'process-secret')
 
     def test_cancellation_after_first_playlist_batch_has_accurate_count(self):
-        self.service.sp.user_playlist_create.return_value = {'id': 'p', 'external_urls': {'spotify': 'https://open.spotify.com/playlist/p'}}
+        self.service.sp.current_user_playlist_create.return_value = {'id': 'p', 'external_urls': {'spotify': 'https://open.spotify.com/playlist/p'}}
         self.service.register_callback('playlist_batch_completed', lambda *args: self.service.cancel_scan())
         result = self.service.create_playlist([track(i) for i in range(150)], ScanConfiguration(), 1, 5)
         self.assertEqual(result.tracks_added, 100)

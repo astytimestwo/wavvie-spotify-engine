@@ -32,6 +32,10 @@ class SpotifyReleaseService:
         self.max_retries = 3
         self.sleep_between_requests = 1.2
         self.max_tracks_per_batch = 100
+        # Spotify allows Development Mode apps at most 10 search results or artist albums per page.
+        self.page_size = 10
+        self.max_search_results = 30
+        self.max_releases_per_group = 200
         
         # Callbacks registration
         self.callbacks: Dict[str, Callable[..., None]] = {}
@@ -334,58 +338,50 @@ class SpotifyReleaseService:
 
     def get_artist_albums_robust(self, artist_id: str, artist_name: str, cutoff_date: datetime) -> List[Dict[str, Any]]:
         all_albums = []
-        offset = 0
-        consecutive_empty_pages = 0
-        max_consecutive_empty = 3
-        
-        while consecutive_empty_pages < max_consecutive_empty:
-            if self.cancelled:
-                break
-            try:
-                result = self.safe_api_call(self.sp.artist_albums, artist_id, limit=50, offset=offset)
-                
-                if not result or not result.get('items'):
-                    consecutive_empty_pages += 1
-                    offset += 50
-                    continue
-                
-                items = result['items']
-                page_albums = []
-                
+        seen_album_ids = set()
+
+        # One group per request: paging through combined groups is unreliable, and
+        # compilations are rejected anyway.
+        for group in ('album', 'single', 'appears_on'):
+            offset = 0
+            newest_first = True
+            previous_date = None
+            while offset < self.max_releases_per_group:
+                if self.cancelled:
+                    return all_albums
+                try:
+                    result = self.safe_api_call(self.sp.artist_albums, artist_id, include_groups=group,
+                                                limit=self.page_size, offset=offset)
+                except Exception as e:
+                    logger.error(f"Error fetching {group} releases at offset {offset} for {artist_name}: {e}")
+                    self.trigger_callback("warning", f"Some releases for {artist_name} could not be loaded: {e}")
+                    break
+
+                items = (result or {}).get('items') or []
+                passed_cutoff = False
                 for album in items:
-                    album_type = album.get('album_type', 'unknown').lower()
-                    if not self.should_include_album_type(album_type):
-                        continue
-                    if self.is_trashy_compilation(album):
-                        continue
-                    if not album.get('release_date'):
-                        continue
-                        
-                    release_date = self.parse_release_date(album['release_date'])
+                    release_date = self.parse_release_date(album.get('release_date'))
+                    if release_date and previous_date and release_date > previous_date:
+                        newest_first = False
+                    previous_date = release_date or previous_date
                     if not release_date or release_date < cutoff_date:
+                        passed_cutoff = passed_cutoff or release_date is not None
                         continue
-                    
-                    page_albums.append(album)
-                
-                if page_albums:
-                    all_albums.extend(page_albums)
-                    consecutive_empty_pages = 0
-                else:
-                    consecutive_empty_pages += 1
-                
-                if len(items) < 50:
+                    album_type = album.get('album_type', 'unknown').lower()
+                    if not self.should_include_album_type(album_type) or self.is_trashy_compilation(album):
+                        continue
+                    # Without a market, Spotify can list the same release more than once.
+                    if album.get('id') in seen_album_ids:
+                        continue
+                    seen_album_ids.add(album.get('id'))
+                    all_albums.append(album)
+
+                # Spotify usually lists a group newest first, so stop once results pass the
+                # cutoff, but keep reading when this artist's releases arrive in another order.
+                if len(items) < self.page_size or (passed_cutoff and newest_first):
                     break
-                offset += 50
-                
-            except Exception as e:
-                logger.error(f"Error fetching albums at offset {offset} for {artist_name}: {e}")
-                self.trigger_callback("warning", f"Some releases for {artist_name} could not be loaded: {e}")
-                consecutive_empty_pages += 1
-                if consecutive_empty_pages >= max_consecutive_empty:
-                    break
-                offset += 50
-                continue
-        
+                offset += self.page_size
+
         return all_albums
 
     def get_artist_collaborations(self, artist_id: str, artist_name: str, cutoff_date: datetime) -> List[Dict[str, Any]]:
@@ -393,6 +389,10 @@ class SpotifyReleaseService:
         seen_signatures = set()
         
         try:
+            # Only a few result pages are affordable, so ask Spotify for releases from the cutoff year on;
+            # otherwise older, more popular matches fill those pages.
+            last_year = max(cutoff_date.year, datetime.now().year)
+            years = f"{cutoff_date.year}-{last_year}" if last_year > cutoff_date.year else str(cutoff_date.year)
             search_queries = [
                 f'feat "{artist_name}"',
                 f'featuring "{artist_name}"',
@@ -406,11 +406,12 @@ class SpotifyReleaseService:
                 if self.cancelled:
                     break
                 offset = 0
-                while offset < 200:
+                while offset < self.max_search_results:
                     if self.cancelled:
                         break
                     try:
-                        result = self.safe_api_call(self.sp.search, q=query, type='track', limit=50, offset=offset)
+                        result = self.safe_api_call(self.sp.search, q=f"{query} year:{years}", type='track',
+                                                    limit=self.page_size, offset=offset)
                         if not result or not result.get('tracks'):
                             break
                         
@@ -471,8 +472,8 @@ class SpotifyReleaseService:
                                     'track_signature': track_signature
                                 })
                         
-                        offset += 50
-                        if len(tracks) < 50:
+                        offset += self.page_size
+                        if len(tracks) < self.page_size:
                             break
                     except Exception as e:
                         logger.warning(f"Error in collab search: {e}")
@@ -719,11 +720,9 @@ class SpotifyReleaseService:
             range_suffix = f" (Artists {start_index}-{end_index})" if start_index != 1 or end_index != 9999 else ""
             playlist_name = config.playlist_name + range_suffix
             
-            user_id = self.user_data['id'] if self.user_data else self.sp.current_user()['id']
-            
+            # POST /me/playlists; Spotify removed per-user playlist creation for Development Mode apps.
             playlist = self.safe_api_call(
-                self.sp.user_playlist_create,
-                user=user_id,
+                self.sp.current_user_playlist_create,
                 name=playlist_name,
                 public=False,
                 description=f"{config.playlist_description} - Range: {start_index}-{end_index}",
