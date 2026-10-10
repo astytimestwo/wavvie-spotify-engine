@@ -304,8 +304,9 @@ class DesktopUXTests(unittest.TestCase):
             threads = []
             with patch('core.workers.urllib.request.urlopen', return_value=io.BytesIO(bytes(buffer.data()))):
                 self.window.download_image(f'https://example.test/image-{index}', lambda img: threads.append(QThread.currentThread()), 20)
+                # The worker is released by its own queued slot, which can run after the image callback.
                 deadline = time.monotonic() + 3
-                while not threads and time.monotonic() < deadline:
+                while (not threads or self.window._workers) and time.monotonic() < deadline:
                     QTest.qWait(10)
             self.assertEqual(threads, [self.app.thread()])
             self.assertEqual(self.window.image_requests, {})
