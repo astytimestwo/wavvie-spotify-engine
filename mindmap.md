@@ -67,7 +67,7 @@ mindmap
 | `ui/theme.py`, `ui/widgets/*` | Shared styling, sidebar, elided labels, animated visualizer. |
 | `ui/resources.py`, `ui/font_loader.py` | Resolves source versus PyInstaller resource paths; loads Loubag/Agrandir fonts directly from bundled ZIPs. |
 | `Wavefeed.spec` | Packages `app.py` and explicit font/branding assets into windowed `dist/wavvie.exe`; spec filename retains an older name. |
-| `tests/fake_spotify.py` | In-memory Spotify Web API transport for tests; enforces the Development Mode limits and routes listed below. |
+| `tests/fake_spotify.py` | In-memory Spotify Web API transport for tests; models the Development Mode routes listed below and can refuse, silently cap or accept 50-item pages. |
 
 ## End-to-end relations
 
@@ -107,11 +107,11 @@ flowchart TD
 2. Load cached followed artists unless refresh is requested. Fresh API data is paginated in groups of 50, sorted case-insensitively by name, and cached.
 3. Apply a **1-based inclusive** artist range. End is clamped to the followed-artist count. Defaults are start 1 and end 9999, so “all” is a practical sentinel rather than unlimited.
 4. Submit artists to a ThreadPoolExecutor, default 5 workers. Each artist runs album discovery followed by collaboration searches.
-5. Album discovery requests the `album`, `single` and `appears_on` groups separately (compilations are rejected anyway), 10 releases per page, skipping repeated listings of an album ID. It rejects compilation types and a hardcoded list of title substrings. A group stops on a short page, after 200 releases, on a request error, or once a page passes the cutoff while that group's dates have arrived newest first; out-of-order dates make it read on.
+5. Album discovery requests the `album`, `single` and `appears_on` groups separately (compilations are rejected anyway), skipping repeated listings of an album ID. It rejects compilation types and a hardcoded list of title substrings. Pages hold 50 releases, or 10 for the rest of the session once Spotify refuses 50 with "Invalid limit". Paging follows Spotify's `next` link and advances by the items returned, so a silently capped page is not mistaken for the last. A group stops when there is no next page, after 200 releases, on a request error, or once a page passes the cutoff while that group's dates have arrived newest first; out-of-order dates make it read on.
 6. Cutoff is **inclusive**: release dates before cutoff are rejected. Year-only dates become January 1; year-month dates become the first of that month. There is no upper date bound.
 7. Album tracks must explicitly credit the followed artist's Spotify ID. Album artist membership determines main versus featured role. Collaboration means the followed artist is absent from album-level artist credits, not simply that multiple performers exist.
-8. Collaboration discovery runs six queries using feat/featuring/ft/with/remix/mix, each limited with a `year:` filter from the cutoff year to the current year, up to 30 results (3 pages of 10) per query. It checks cutoff, compilation rules, performer ID, title substrings, and absence from album-level main artists. This is heuristic discovery, not an exhaustive collaboration catalog.
-9. Signature = lowercase track name plus sorted lowercase performer names, joined by `|`. No whitespace/version normalization, ISRC matching, or artist-ID-based signature is applied.
+8. Collaboration discovery runs six queries using feat/featuring/ft/with/remix/mix, each limited with a `year:` filter from the cutoff year to the current year, up to 30 results per query (one request, or three when pages are limited to 10). It checks cutoff, compilation rules, performer ID, title substrings, and absence from album-level main artists. This is heuristic discovery, not an exhaustive collaboration catalog.
+9. Signature = lowercase track name without bracketed feat./ft./featuring notes (closed or not), plus sorted lowercase performer names, joined by `|`. Featured performers are already in the artist list; the live catalog had one song on two album editions whose titles differed only by a missing closing parenthesis. No other whitespace/version normalization, ISRC matching, or artist-ID-based signature is applied.
 10. Within an artist's album results, prefer album, then single, EP, compilation, unknown; tie-break by earliest release-date string. Search results only supplement signatures absent from album results.
 11. Across artists, first completed result wins for each signature. Global selection does not reapply album-version priority. Final tracks sort descending by their original release-date strings.
 12. The API reports EPs as singles. A single with four or more tracks is labelled `ep`, as Spotify's apps do, for both album and search discoveries.
@@ -125,7 +125,7 @@ Checked against Spotify's reference and February 2026 migration guide on 2026-10
 - The app owner needs Spotify Premium, and an app has at most five users.
 - The migration guide removes `album_group` from album objects (the artist-albums reference still lists it as deprecated) and `followers`/`popularity` from artist objects. wavvie relies on none of them.
 
-These limits are encoded in `tests/fake_spotify.py`. No live Spotify run has confirmed them yet; recheck Spotify's changelog for anything newer.
+A live check on 2026-10-10 with a Development Mode app found the documentation stricter than the service. Spotify still served 50 search results and artist albums per page, and album objects still carried `album_group`. Albums and singles came back newest first (15 of 15 groups checked); appears-on releases did not (6 of 6). wavvie therefore asks for 50 and falls back to 10 only if refused. Recheck Spotify's changelog for anything newer.
 
 ### Desktop orchestration
 
@@ -181,7 +181,8 @@ The UI/UX pass on 2026-09-06 resolved the original duplicate-count, artwork impo
 
 ### Remaining scope boundaries
 
-- Discovery heuristics (queries, title keywords, signatures, first-completed global selection) are unchanged apart from the paging that Development Mode limits require. No live Spotify API/OAuth run has verified the 2026-10-10 changes.
+- Discovery heuristics (queries, title keywords, first-completed global selection) are unchanged apart from paging and feature-note handling in signatures. The live check covered the CLI path; the 10-item fallback has only run against the fake, and the desktop window has not been run against Spotify.
+- The 1,000-track results test can exceed its 8-second limit on a busy machine. Profiling showed row-widget construction dominates (about 0.9 s of 2.2 s in Python, the rest in Qt), not filtering; a faster list would need a model/view rewrite.
 - Full results and activity history remain session-only. A created or partially populated playlist has no rollback/resume mechanism; its link is retained for inspection.
 - Token, artist-cache and automatic-export files are relative to the working directory, so a packaged app started with an unexpected working directory writes them there.
 
@@ -193,9 +194,11 @@ Automated layout checks exercise every page at 1000×640, 1280×820, and 1600×1
 
 Validation on 2026-09-06: 50 tests passed, plus the layout test at 150% display scaling. The image-completion test in that suite was flaky: it asserted worker cleanup before the separately queued cleanup slot had run, failing in about a third of runs on 2026-10-10.
 
-`tests/test_spotify_web_api.py` runs the real spotipy client against `tests/fake_spotify.py`, which enforces the Development Mode limits above. `tests/test_cli.py` covers CLI orchestration with a stand-in service. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
+`tests/test_spotify_web_api.py` runs the real spotipy client against `tests/fake_spotify.py`, covering refused, silently capped and accepted 50-item pages. `tests/test_cli.py` covers CLI orchestration with a stand-in service. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
 
-Final validation on 2026-10-10: **68 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. A 1,000-track result set showed its initial 50-row batch in 0.11–0.33 seconds and finished in 2.5–3.9 seconds with event-loop yields; under heavy machine load that test can exceed its 1 s and 8 s limits. The image-completion test now waits for both the UI-thread callback and worker release (30 of 30 isolated runs passed). Use `python -m unittest discover -s tests -v`; the desktop regression module selects Qt's offscreen platform. On Windows, run in an environment that permits temporary-file creation and cleanup. `git diff --check` should also pass.
+Final validation on 2026-10-10: **77 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. A 1,000-track result set showed its initial 50-row batch in 0.18–0.46 seconds and finished in 3.6–7.6 seconds with event-loop yields; on a busy machine that test can exceed its 1 s and 8 s limits.
+
+Live check on 2026-10-10 (Development Mode app, CLI): sign-in, 325 followed artists, and a five-artist scan of artists 1–5 since 2026-09-10 (5 tracks in 22 seconds, previously 55 seconds with fixed 10-item pages). Also covered: JSON export, and one private playlist created with `POST /me/playlists`. Its 5 items were added with `/items` and read back unique and in export order. That run also found the feature-note duplicate and the missing `main_artist` on album-found features, both since fixed. The image-completion test now waits for both the UI-thread callback and worker release (30 of 30 isolated runs passed). Use `python -m unittest discover -s tests -v`; the desktop regression module selects Qt's offscreen platform. On Windows, run in an environment that permits temporary-file creation and cleanup. `git diff --check` should also pass.
 
 ## Where to work next
 

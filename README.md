@@ -23,7 +23,7 @@ wavvie is a desktop and CLI tool for discovering new Spotify releases from follo
    - Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
    - Create an app to get your `Client ID` and `Client Secret`.
    - Set the Redirect URI to `http://127.0.0.1:8888/callback`.
-   - New Spotify apps run in Development Mode. Since February 2026 the app owner needs Spotify Premium, at most five users can use the app, and search and artist-album requests return at most 10 items per page, so scans make more, smaller requests.
+   - New Spotify apps run in Development Mode. Since February 2026 the app owner needs Spotify Premium and at most five users can use the app. Spotify also documents a maximum of 10 search results or artist albums per page for these apps; wavvie asks for 50 and switches to 10 if Spotify refuses.
 
 2. **Environment Variables**:
    - Copy `.env.example` to `.env`.
@@ -106,9 +106,11 @@ git diff --check
 
 The UI regression suite uses Qt's offscreen platform, bundled fonts, temporary INI preferences, and mocked Spotify responses. It covers real widget interactions, worker completion, cancellation, shutdown, settings, outputs, long text, large results, and layouts at 1000×640, 1280×820, and 1600×1000. No account credentials or real playlists are needed. Temporary-file creation and cleanup must be permitted by the execution environment.
 
-Service tests run the real spotipy client against `tests/fake_spotify.py`, an in-memory transport that enforces the documented Development Mode page limits and playlist routes. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
+Service tests run the real spotipy client against `tests/fake_spotify.py`, an in-memory transport for the Development Mode playlist routes that can refuse, silently cap or accept 50-item pages. Sign-in tests start spotipy's real local redirect server with the browser launch patched out.
 
-Validation on 2026-10-10: **68 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. The 1,000-track check showed its first 50 rows in 0.11–0.33 seconds and finished loading in 2.5–3.9 seconds. These timings describe the local test machine; under heavy machine load the large-results test can exceed its limits. No Spotify account was used, so live API behaviour and the packaged executable remain unverified.
+Validation on 2026-10-10: **77 tests passed** in three consecutive full runs, plus the layout test at **150% display scaling**. The 1,000-track check showed its first 50 rows in 0.18–0.46 seconds and finished loading in 3.6–7.6 seconds; that test's 8-second limit can be exceeded when the machine is busy. Most of that time is spent building row widgets.
+
+Live check on 2026-10-10 with a Development Mode app and the CLI: sign-in, 325 followed artists, a five-artist scan (5 tracks in 22 seconds, 50-item pages accepted), JSON export and one private playlist (5 tracks) all worked. The desktop window and the packaged executable were not run against Spotify; they share the same service code.
 
 See [mindmap.md](mindmap.md) for the implementation map, data flow, Spotify API constraints, and remaining integration boundaries.
 
